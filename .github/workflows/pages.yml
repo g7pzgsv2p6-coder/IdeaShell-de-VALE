@@ -1,0 +1,41 @@
+name: Publicar en GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Marcar la versión del service worker
+        # Cambia el nombre de la caché en cada despliegue para que los teléfonos reciban la versión nueva.
+        run: sed -i "s/const BUILD = 'dev';/const BUILD = '${GITHUB_SHA::8}';/" app/sw.js
+
+      - name: Configurar Pages
+        uses: actions/configure-pages@v5
+
+      - name: Subir la app
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: app
+
+      - name: Desplegar
+        id: deployment
+        uses: actions/deploy-pages@v4
