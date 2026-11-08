@@ -1,4 +1,4 @@
-// Service worker de Chispa: guarda la app en el teléfono para abrir sin internet.
+// Service worker de IdeaShel Vale: guarda la app en el teléfono para abrir sin internet.
 // BUILD se reemplaza automáticamente en cada despliegue (ver .github/workflows/pages.yml).
 const BUILD = 'dev';
 const CACHE = `chispa-1.0.0-${BUILD}`;
@@ -53,7 +53,7 @@ self.addEventListener('fetch', (event) => {
       try {
         return await fetch(req);
       } catch (e) {
-        return new Response('<h1>Sin conexión</h1><p>Abra Chispa una vez con internet para instalarla.</p>', {
+        return new Response('<h1>Sin conexión</h1><p>Abra IdeaShel Vale una vez con internet para instalarla.</p>', {
           headers: { 'Content-Type': 'text/html; charset=utf-8' }
         });
       }

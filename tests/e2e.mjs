@@ -1,4 +1,4 @@
-// Prueba de punta a punta de Chispa en tamaño iPhone, con capturas.
+// Prueba de punta a punta de IdeaShel Vale en tamaño iPhone, con capturas.
 // Uso: node tests/e2e.mjs   (sirve la carpeta app/ en /IdeaShell-de-VALE/ como en GitHub Pages)
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
@@ -89,7 +89,7 @@ try {
     title: document.querySelector('meta[name="apple-mobile-web-app-title"]')?.content,
     viewport: document.querySelector('meta[name="viewport"]')?.content
   }));
-  check('Meta tags de iOS', metas.capable === 'yes' && metas.title === 'Chispa' && metas.viewport.includes('viewport-fit=cover'));
+  check('Meta tags de iOS', metas.capable === 'yes' && metas.title === 'IdeaShel Vale' && metas.viewport.includes('viewport-fit=cover'));
 
   const voiceBtn = await page.isVisible('#recBtn');
   check('Botón grande de grabar visible (navegador con reconocimiento de voz)', voiceBtn);

@@ -1,4 +1,4 @@
-# Chispa · ideas por voz
+# IdeaShel Vale · ideas por voz
 
 App web instalable (PWA) para iPhone para capturar ideas por voz y organizarlas. Funciona sola: no depende de ningún servidor propio, todo queda guardado en el teléfono (IndexedDB) y abre sin internet.
 

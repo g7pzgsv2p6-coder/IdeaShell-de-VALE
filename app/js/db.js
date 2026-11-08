@@ -55,7 +55,7 @@ export function openDB() {
       resolve(db);
     };
     req.onerror = () => reject(friendly(req.error));
-    req.onblocked = () => reject(new StorageError('La base de datos está en uso por otra ventana de Chispa. Ciérrela e intente de nuevo.'));
+    req.onblocked = () => reject(new StorageError('La base de datos está en uso por otra ventana de IdeaShel Vale. Ciérrela e intente de nuevo.'));
   });
   dbPromise.catch(() => { dbPromise = null; });
   return dbPromise;

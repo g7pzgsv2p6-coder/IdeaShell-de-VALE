@@ -20,11 +20,11 @@ export class AIError extends Error {
   }
 }
 
-const SYSTEM = 'Usted es el asistente de Chispa, una app para capturar y ordenar ideas. ' +
+const SYSTEM = 'Usted es el asistente de IdeaShel Vale, una app para capturar y ordenar ideas. ' +
   'Responda siempre en español de Chile, claro y breve, tratando al usuario de usted. ' +
   'Trabaje solo con la información de las ideas entregadas; no invente datos.';
 
-const OFFLINE_MSG = 'Sin conexión a internet. Las funciones de IA necesitan internet; el resto de Chispa funciona igual sin conexión.';
+const OFFLINE_MSG = 'Sin conexión a internet. Las funciones de IA necesitan internet; el resto de IdeaShel Vale funciona igual sin conexión.';
 
 async function fetchJSON(url, options, timeoutMs = 60000) {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {

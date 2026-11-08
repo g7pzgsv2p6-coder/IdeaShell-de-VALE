@@ -1,4 +1,4 @@
-// Logo original de Chispa: burbuja de voz con una chispa, en violeta y coral.
+// Logo original de IdeaShel Vale: burbuja de voz con una chispa, en violeta y coral.
 export function logoSVG({ size = 512, rounded = false, maskable = false } = {}) {
   const inner = `
     <rect x="104" y="112" width="304" height="236" rx="76" fill="#FFFFFF"/>

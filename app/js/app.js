@@ -1,4 +1,4 @@
-// Chispa · captura y organización de ideas por voz
+// IdeaShel Vale · captura y organización de ideas por voz
 import { db, loadSettings, saveSetting } from './db.js';
 import * as AI from './ai.js';
 import { Dictation, voiceSupported, voiceErrorMessage, VOICE_LANGS } from './voice.js';
@@ -550,7 +550,7 @@ function renderIdeas() {
     empty.hidden = false;
     if (!activeIdeas().length) {
       empty.innerHTML = `<div class="empty-art" aria-hidden="true">✦</div>
-        <h3>Su primera chispa</h3>
+        <h3>Su primera idea</h3>
         <p>Toque el botón morado y diga su idea en voz alta, o escríbala arriba. Todo queda guardado solo en este teléfono.</p>`;
     } else {
       empty.innerHTML = `<div class="empty-art" aria-hidden="true">🔍</div>
@@ -1213,7 +1213,7 @@ function renderOrganize(groups) {
 
 async function exportMarkdown() {
   const ideas = activeIdeas().sort((a, b) => b.createdAt - a.createdAt);
-  const lines = [`# Mis ideas en Chispa`, ``, `Exportado el ${fmtFull(Date.now())} · ${ideas.length} ideas`, ``];
+  const lines = [`# Mis ideas en IdeaShel Vale`, ``, `Exportado el ${fmtFull(Date.now())} · ${ideas.length} ideas`, ``];
   const groups = [...sortedCats().map((c) => ({ name: c.name, list: ideas.filter((i) => i.category === c.id) })),
     { name: 'Sin categoría', list: ideas.filter((i) => !i.category || !catById(i.category)) }];
   for (const g of groups) {
@@ -1229,7 +1229,7 @@ async function exportMarkdown() {
     }
   }
   const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
-  await shareOrDownload(blob, `chispa-ideas-${stamp()}.md`, 'Mis ideas (Chispa)');
+  await shareOrDownload(blob, `ideashel-vale-ideas-${stamp()}.md`, 'Mis ideas (IdeaShel Vale)');
 }
 
 // ---------------------------------------------------------------- respaldo
@@ -1277,7 +1277,7 @@ function buildBackup() {
 async function exportBackup() {
   const data = buildBackup();
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const ok = await shareOrDownload(blob, `chispa-respaldo-${stamp()}.json`, 'Respaldo de Chispa');
+  const ok = await shareOrDownload(blob, `ideashel-vale-respaldo-${stamp()}.json`, 'Respaldo de IdeaShel Vale');
   if (!ok) return;
   await setSetting('lastBackupAt', Date.now());
   hideBanner();
@@ -1332,11 +1332,11 @@ async function importBackup(file) {
   try {
     data = JSON.parse(await file.text());
   } catch (e) {
-    await alertDialog('No se pudo importar', 'El archivo no es un respaldo válido (el JSON está dañado o no es de Chispa).');
+    await alertDialog('No se pudo importar', 'El archivo no es un respaldo válido (el JSON está dañado o no es de IdeaShel Vale).');
     return;
   }
   if (!data || !Array.isArray(data.ideas)) {
-    await alertDialog('No se pudo importar', 'El archivo no parece un respaldo de Chispa: no contiene una lista de ideas.');
+    await alertDialog('No se pudo importar', 'El archivo no parece un respaldo de IdeaShel Vale: no contiene una lista de ideas.');
     return;
   }
   const ideas = data.ideas.map(sanitizeIdea).filter(Boolean);
@@ -1463,11 +1463,11 @@ function renderSettings() {
 
     <div class="card">
       <h2 class="card-title">Inteligencia artificial <small>(opcional)</small></h2>
-      <p class="muted">Sin clave, Chispa funciona completa y las funciones de IA quedan ocultas. Elija un proveedor:</p>
+      <p class="muted">Sin clave, IdeaShel Vale funciona completa y las funciones de IA quedan ocultas. Elija un proveedor:</p>
       <label class="radio-row standalone"><input type="radio" name="aiProv" value="none" ${s.aiProvider === 'none' ? 'checked' : ''}><span>Sin IA</span></label>
       ${keyField('gemini', 'Gemini de Google · nivel gratuito', s.geminiKey, 'Pegue su clave de Google AI Studio')}
       ${keyField('claude', 'Claude de Anthropic · pago por uso', s.claudeKey, 'Pegue su clave sk-ant-…')}
-      <p class="lock-note">🔒 Su clave queda guardada solo en este teléfono. Chispa la envía únicamente al proveedor elegido (Google o Anthropic) cuando usted pide una función de IA, y nunca se incluye en los respaldos.</p>
+      <p class="lock-note">🔒 Su clave queda guardada solo en este teléfono. IdeaShel Vale la envía únicamente al proveedor elegido (Google o Anthropic) cuando usted pide una función de IA, y nunca se incluye en los respaldos.</p>
       ${(s.geminiKey || s.claudeKey) ? '<button type="button" class="btn danger-ghost full-w" id="delAllKeys">Borrar todas las claves</button>' : ''}
     </div>
 
@@ -1507,9 +1507,9 @@ function renderSettings() {
     </div>
 
     <div class="card about">
-      <h2 class="card-title">Acerca de Chispa</h2>
+      <h2 class="card-title">Acerca de IdeaShel Vale</h2>
       <p class="muted">Versión ${APP_VERSION} · Funciona sin internet · Sus datos viven solo en este teléfono.</p>
-      <p class="muted small" id="storageInfo">${state.persisted === true ? '✓ Almacenamiento protegido contra borrado automático.' : state.persisted === false ? 'Consejo: instale Chispa en la pantalla de inicio para proteger mejor sus datos y haga respaldos periódicos.' : ''}</p>
+      <p class="muted small" id="storageInfo">${state.persisted === true ? '✓ Almacenamiento protegido contra borrado automático.' : state.persisted === false ? 'Consejo: instale IdeaShel Vale en la pantalla de inicio para proteger mejor sus datos y haga respaldos periódicos.' : ''}</p>
     </div>`;
 
   // Categorías
@@ -1753,7 +1753,7 @@ function registerSW() {
   });
   navigator.serviceWorker.register('./sw.js').then((reg) => {
     const notify = (worker) => {
-      toast('Hay una nueva versión de Chispa.', { action: 'Actualizar', duration: 10000, onAction: () => worker.postMessage('skipWaiting') });
+      toast('Hay una nueva versión de IdeaShel Vale.', { action: 'Actualizar', duration: 10000, onAction: () => worker.postMessage('skipWaiting') });
     };
     if (reg.waiting && hadController) notify(reg.waiting);
     reg.addEventListener('updatefound', () => {

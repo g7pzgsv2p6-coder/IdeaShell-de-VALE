@@ -1,4 +1,4 @@
-// Utilidades generales de Chispa
+// Utilidades generales de IdeaShel Vale
 
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));

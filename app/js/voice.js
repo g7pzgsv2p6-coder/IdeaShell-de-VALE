@@ -16,7 +16,7 @@ export function voiceErrorMessage(code) {
   switch (code) {
     case 'not-allowed':
     case 'service-not-allowed':
-      return 'Chispa no tiene permiso para usar el micrófono o el reconocimiento de voz. En el iPhone revise Ajustes → Apps → Safari → Micrófono, y que Siri y Dictado estén activados. Mientras tanto, puede dictar con el micrófono del teclado.';
+      return 'IdeaShel Vale no tiene permiso para usar el micrófono o el reconocimiento de voz. En el iPhone revise Ajustes → Apps → Safari → Micrófono, y que Siri y Dictado estén activados. Mientras tanto, puede dictar con el micrófono del teclado.';
     case 'no-speech':
       return 'No se escuchó nada. Intente de nuevo hablando un poco más cerca del teléfono.';
     case 'audio-capture':
