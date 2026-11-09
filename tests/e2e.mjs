@@ -4,6 +4,7 @@
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, symlinkSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -112,6 +113,10 @@ await context.route('https://generativelanguage.googleapis.com/**', async (route
     text = 'Revisamos el manejo de residuos con el proveedor. Hay que pedir cotización directa y digitalizar la documentación antes de la fiscalización del jueves.';
   } else if (allText.includes('Esta es la idea o nota')) {
     text = 'Según la nota, sus tareas son:\n- Pedir **cotización directa** al proveedor\n- Digitalizar la documentación';
+  } else if (allText.includes('Este es el plan de trabajo')) {
+    text = 'Hoy le conviene priorizar:\n- **T02** Recorrido por la bodega central\n- Preparar el entregable **E02**';
+  } else if (allText.includes('Mejore la redacción')) {
+    text = 'Reporte semanal mejorado por la IA\n• Avance según lo planificado';
   } else if (allText.includes('resumen de la semana')) {
     text = '## Lo principal\n- Reunión de proveedores\n## Decisiones y avances\n- Pedir cotización directa\n## Pendientes\n- Digitalizar documentación\n## Sugerencia para la próxima semana\n- Cerrar la cotización';
   } else if (allText.includes('Estas son las ideas guardadas')) {
@@ -539,6 +544,118 @@ try {
   const merged = (await idb('ideas')).find((i) => i.id === carla.id);
   check('Combinar dos ideas (contenido y pasos juntos)', merged.text.includes('Acuerdos:') && merged.steps.length === 3, `${merged.steps.length} pasos`);
   if (await page.locator('.sheet.editor').count()) await closeEditor();
+  await go('all');
+
+  // ---------- plan de trabajo desde Excel (datos ficticios) ----------
+  const planXlsx = join(site, 'plan-demo.xlsx');
+  execFileSync('python3', [join(root, 'tests', 'make-plan-fixture.py'), planXlsx]);
+  await page.click('.home-tabs [data-tab="plan"]');
+  await page.waitForTimeout(300);
+  check('Plan: pantalla para importar el Excel', await page.isVisible('#planImport'));
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('#planImport')]);
+  await chooser.setFiles(planXlsx);
+  await page.waitForSelector('.plan-hero', { timeout: 10000 });
+  const plans = await idb('plans');
+  check('Plan: Excel importado (actividades, entregables, metas, bitácora, reglas)',
+    plans.length === 1 && plans[0].activities.length === 15 && plans[0].deliverables.length === 6 && plans[0].goals.length === 4 && plans[0].log.length === 6 && plans[0].weekTemplate.length === 7 && plans[0].rules.length === 2,
+    `${plans[0]?.activities.length} act, ${plans[0]?.deliverables.length} ent, ${plans[0]?.goals.length} metas`);
+  check('Plan: frentes con su peso', plans[0].fronts.map((f) => `${f.code}:${f.weight}`).join(',') === 'A:0.5,B:0.3,C:0.2');
+  check('Plan: feriado detectado', plans[0].holidays.length === 1);
+  check('Plan: resumen con anillo de avance y alertas de atraso', await page.locator('.ring').count() === 1 && Number(await page.locator('.kpi').nth(1).locator('b').innerText()) > 0);
+  await page.evaluate(() => { window.scrollTo(0, 0); document.getElementById('toast').classList.remove('show'); });
+  await shot('20-plan-resumen.png');
+  await page.click('[data-sec="agenda"]');
+  await page.waitForTimeout(300);
+  check('Plan: agenda con bloque de atrasadas', await page.locator('.late-block').count() === 1);
+  await shot('21-plan-agenda.png');
+  const firstLate = await page.locator('.late-block [data-check]').first().getAttribute('data-check');
+  await page.click(`.late-block [data-check="${firstLate}"]`);
+  await page.waitForTimeout(700);
+  check('Plan: completar actividad con un toque', (await idb('plans'))[0].activities.find((a) => a.id === firstLate).status === 'Completada');
+  await page.locator('.act-row .act-main').first().click();
+  await page.waitForSelector('.act-sheet');
+  await page.waitForTimeout(300);
+  await page.click('.act-sheet [data-status="Bloqueada"]');
+  await page.fill('#asNotes', 'Falta la credencial de acceso');
+  await page.waitForTimeout(600);
+  await shot('22-plan-actividad.png');
+  await page.click('.act-sheet [data-close]');
+  await page.waitForTimeout(700);
+  const blockedOk = (await idb('plans'))[0].activities.some((a) => a.status === 'Bloqueada' && a.notes.includes('credencial'));
+  check('Plan: marcar bloqueo con observación', blockedOk);
+  await page.click('[data-sec="calendario"]');
+  await page.waitForTimeout(300);
+  check('Plan: calendario mensual con puntos por frente', await page.locator('.cal-cell .dots i').count() >= 10);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await shot('23-plan-calendario.png');
+  await page.click('[data-sec="semanas"]');
+  await page.waitForTimeout(300);
+  check('Plan: semanas con línea de tiempo (Gantt)', await page.locator('.week-card').count() === 4 && await page.locator('.g-dot').count() >= 15);
+  await shot('24-plan-semanas.png');
+  await page.click('[data-sec="entregables"]');
+  await page.waitForTimeout(300);
+  await page.click('[data-dmode="todos"]');
+  await page.waitForTimeout(200);
+  await page.locator('[data-del]').first().click();
+  await page.waitForSelector('.act-sheet');
+  await page.waitForTimeout(250);
+  await page.click('.act-sheet [data-dstatus="Entregado"]');
+  await page.click('.act-sheet [data-close]');
+  await page.waitForTimeout(700);
+  check('Plan: marcar entregable como entregado', (await idb('plans'))[0].deliverables.some((d) => d.status === 'Entregado' && d.realDate));
+  await page.click('[data-sec="metas"]');
+  await page.waitForTimeout(300);
+  await page.locator('[data-goal="M1"] [data-step="1"]').click();
+  await page.waitForTimeout(700);
+  check('Plan: actualizar meta con + y −', (await idb('plans'))[0].goals[0].real === 1);
+  await page.click('[data-sec="personas"]');
+  await page.waitForTimeout(300);
+  const people = await page.locator('.person').allInnerTexts();
+  check('Plan: personas unificadas ("Carlos" = "Carlos Rivas")', people.some((t) => t.includes('Carlos Rivas')) && !people.some((t) => /^C\s*Carlos\s*\n/.test(t)) && people.length === 3, people.map((t) => t.split('\n')[1]).join(', '));
+  await shot('25-plan-personas.png');
+  await page.click('[data-sec="bitacora"]');
+  await page.waitForTimeout(300);
+  await page.locator('[data-log="0"]').click();
+  await page.waitForSelector('.log-sheet');
+  await page.waitForTimeout(300);
+  await page.click('[data-fill]');
+  await page.waitForTimeout(300);
+  check('Plan: bitácora se completa sola con las actividades del día', (await page.inputValue('[data-f="meetings"]')).includes('Beatriz'));
+  await page.check('.log-sheet [data-sent]');
+  await page.click('.log-sheet [data-close]');
+  await page.waitForTimeout(700);
+  check('Plan: bitácora marcada como enviada', (await idb('plans'))[0].log[0].sent === true);
+  await page.click('[data-sec="reporte"]');
+  await page.waitForTimeout(300);
+  check('Plan: reporte semanal armado solo', (await page.inputValue('#reportText')).includes('Reporte semana'));
+  await page.click('#rpAI');
+  await page.waitForFunction(() => document.querySelector('#reportText').value.includes('mejorado por la IA'));
+  check('Plan: mejorar redacción del reporte con IA', true);
+  await page.click('[data-sec="reglas"]');
+  await page.waitForTimeout(300);
+  check('Plan: semana tipo con el día de hoy destacado', await page.locator('.week-tpl li.today').count() === 1);
+  await page.click('[data-sec="resumen"]');
+  await page.waitForTimeout(300);
+  await page.click('#planChat');
+  await page.waitForSelector('.sheet.askall .sug-chip');
+  await page.click('.sheet.askall .sug-chip >> nth=0');
+  await page.waitForSelector('.sheet.askall .bubble.ai .md');
+  check('Plan: chat con la IA sobre el plan', (await page.innerText('.sheet.askall .bubble.ai')).includes('T02'));
+  await page.click('.sheet.askall [data-close]');
+  await page.waitForTimeout(300);
+  await page.reload();
+  await ready();
+  await page.click('.home-tabs [data-tab="plan"]');
+  await page.waitForTimeout(400);
+  check('Plan: el avance queda guardado al recargar', await page.locator('.plan-hero').count() === 1 && (await page.innerText('#homeSub')).includes('avance'));
+  await page.click('.home-tabs [data-tab="ideas"]');
+  await page.waitForTimeout(300);
+  check('Panel Hoy muestra las actividades del plan', await page.locator('.today-card.plan-card').count() === 1);
+  await go('settings');
+  const [dl2] = await Promise.all([page.waitForEvent('download'), page.click('#doExport')]);
+  const bk2 = join(site, 'respaldo2.json');
+  await dl2.saveAs(bk2);
+  check('El respaldo incluye el plan y su avance', JSON.parse(readFileSync(bk2, 'utf8')).plans?.[0]?.activities.length === 15);
   await go('all');
 
   // Borrar claves

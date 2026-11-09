@@ -326,6 +326,23 @@ export async function chatAll(cfg, ideas, history, describe) {
   return send(cfg, msgs);
 }
 
+/** Mejora la redacción de un reporte sin cambiar los datos. */
+export async function polishReport(cfg, text) {
+  const prompt = 'Mejore la redacción de este reporte semanal de trabajo para enviarlo a la jefatura o contraparte. ' +
+    'Mantenga todos los datos, cifras, fechas, nombres e ID tal cual; no invente nada. ' +
+    'Use un tono profesional y cercano, frases cortas y viñetas "• ". Devuelva solo el reporte.\n\nReporte:\n' + text.slice(0, 12000);
+  return (await ask(cfg, prompt)).replace(/\*\*/g, '').trim();
+}
+
+/** Chat sobre el plan de trabajo. planText: el plan en texto; history incluye la pregunta nueva. */
+export async function chatPlan(cfg, planText, history) {
+  const context = 'Este es el plan de trabajo de la usuaria. Ayúdele a organizarse y priorizar usando solo esta información. ' +
+    'Cite los ID de actividades (T01) y entregables (E01) cuando sirva. Sea breve y use viñetas "- ".\n\n' + planText.slice(0, 60000);
+  const msgs = [{ role: 'user', text: context }, { role: 'assistant', text: 'Entendido. ¿En qué la ayudo con su plan?' }];
+  for (const m of history.slice(-12)) msgs.push({ role: m.role === 'ai' ? 'assistant' : 'user', text: m.text });
+  return send(cfg, msgs);
+}
+
 /** Resumen semanal en formato de nota (## títulos y viñetas). */
 export async function weekDigest(cfg, ideas, describe) {
   const list = ideas.slice(0, 120).map((i, n) => `${n + 1}. ${describe(i)}`).join('\n');

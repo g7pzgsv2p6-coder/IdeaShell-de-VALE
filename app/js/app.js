@@ -2,6 +2,8 @@
 import { db, loadSettings, saveSetting } from './db.js';
 import * as AI from './ai.js';
 import { Dictation, voiceSupported, voiceErrorMessage, VOICE_LANGS } from './voice.js';
+import { createPlanUI } from './plan-ui.js';
+import { planStats, todayYmd } from './plan.js';
 import { parseDateES, extractTasks, relatedIdeas, findDuplicate, suggestCategory } from './smart.js';
 import { AudioRecorder, audioSupported, micErrorMessage, fmtDuration, toWavChunks, blobToBase64, base64ToBlob } from './recorder.js';
 import {
@@ -9,7 +11,7 @@ import {
   fmtFull, fmtShortDate, fmtRelative, daysBetween, stamp
 } from './util.js';
 
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 const TRASH_DAYS = 30;
 
 const DEFAULT_CATEGORIES = [
@@ -64,7 +66,9 @@ const state = {
   organizeResult: null,
   processing: new Map(),
   globalChat: [],
-  recording: false
+  recording: false,
+  plan: null,
+  planSection: 'resumen'
 };
 
 // ---------------------------------------------------------------- datos
@@ -171,7 +175,9 @@ function newIdea(text, category) {
 }
 
 async function loadData() {
-  const [ideas, cats, settings] = await Promise.all([db.getAll('ideas'), db.getAll('categories'), loadSettings()]);
+  const [ideas, cats, settings, plans] = await Promise.all([db.getAll('ideas'), db.getAll('categories'), loadSettings(), db.getAll('plans')]);
+  state.plan = (plans || []).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0] || null;
+  if (settings.planSection) state.planSection = settings.planSection;
   state.settings = { ...DEFAULT_SETTINGS, ...settings };
   state.ideas = ideas || [];
   state.categories = cats || [];
@@ -348,6 +354,7 @@ function setView(view) {
   if (view === 'ideas') renderIdeas();
   if (view === 'tasks') renderTasks();
   if (view === 'board') renderBoard();
+  if (view === 'plan') planUI.render();
   if (view === 'explore') renderExplore();
   if (view === 'settings') renderSettings();
   window.scrollTo({ top: 0 });
@@ -358,6 +365,7 @@ function refreshView() {
   if (state.view === 'ideas') renderIdeas();
   if (state.view === 'tasks') renderTasks();
   if (state.view === 'board') renderBoard();
+  if (state.view === 'plan' && !document.querySelector('.sheet.act-sheet, .sheet.log-sheet')) planUI.render();
   if (state.view === 'explore') renderExplore();
 }
 
@@ -402,6 +410,7 @@ function openDrawer() {
         ${item('data-go="scheduled"', '⏰', 'Programadas', count((i) => i.remindAt), state.view === 'ideas' && f.scheduled)}
         ${item('data-go="tasks"', '☑', 'Tareas', pendingTasks().length, state.view === 'tasks')}
         ${item('data-go="board"', '▦', 'Tablero', undefined, state.view === 'board')}
+        ${item('data-go="plan"', '📋', 'Plan de trabajo', state.plan ? state.plan.activities.filter((a) => a.date === todayYmd()).length || undefined : undefined, state.view === 'plan')}
         ${item('data-go="explore"', '✦', 'Explorar', undefined, state.view === 'explore')}
       </nav>
       <h3 class="drawer-title">Categorías</h3>
@@ -448,6 +457,7 @@ function openDrawer() {
       case 'explore': setView('explore'); break;
       case 'tasks': setView('tasks'); break;
       case 'board': setView('board'); break;
+      case 'plan': setView('plan'); break;
       case 'settings': setView('settings'); break;
       case 'personalize':
         setView('settings');
@@ -1730,7 +1740,7 @@ function renderToday() {
   const f = state.filters;
   const filtered = f.q || f.category !== 'all' || f.fav || f.tag || f.status || f.archived || f.audio || f.scheduled;
   const ideas = activeIdeas().filter((i) => !i.archived);
-  if (filtered || ideas.length < 2) { box.hidden = true; return; }
+  if (filtered || (ideas.length < 2 && !state.plan)) { box.hidden = true; return; }
   const due = ideas.filter((i) => i.remindAt && i.remindAt <= endOfToday() && i.status !== 'hecha');
   const tasks = pendingTasks();
   const cfg = aiConfig();
@@ -1739,6 +1749,10 @@ function renderToday() {
   const stale = ideas.filter((i) => i.status !== 'hecha' && (i.updatedAt || i.createdAt) < weekAgo)
     .sort((a, b) => Number(b.favorite) - Number(a.favorite) || (a.updatedAt || a.createdAt) - (b.updatedAt || b.createdAt))[0];
   const cards = [];
+  if (state.plan) {
+    const ps = planStats(state.plan);
+    cards.push(`<button type="button" class="today-card plan-card ${ps.acts.late ? 'warn' : 'hot'}" data-today="plan"><span class="tc-icon">📋</span><b>${ps.acts.today}</b><span>${ps.acts.today === 1 ? 'actividad del plan hoy' : 'actividades del plan hoy'}${ps.acts.late ? ` · ${ps.acts.late} atrasadas` : ''}</span></button>`);
+  }
   const next = ideas.filter((i) => i.remindAt && i.remindAt > endOfToday() && i.status !== 'hecha').sort((a, b) => a.remindAt - b.remindAt)[0];
   if (due.length || !next) {
     cards.push(`<button type="button" class="today-card ${due.length ? 'hot' : ''}" data-today="due"><span class="tc-icon">⏰</span><b>${due.length}</b><span>${due.length === 1 ? 'recordatorio hoy' : 'recordatorios hoy'}</span></button>`);
@@ -1756,6 +1770,7 @@ function renderToday() {
     const k = b.dataset.today;
     if (k === 'due') goIdeas({ scheduled: true });
     if (k === 'tasks') setView('tasks');
+    if (k === 'plan') { state.planSection = 'agenda'; setView('plan'); }
     if (k === 'stale' || k === 'next') openEditor(b.dataset.id);
     if (k === 'organize') {
       unorganized.forEach((i) => processIdea(i.id, { transcribe: AI.canHearAudio(cfg) }));
@@ -2321,23 +2336,63 @@ function icsDate(ts) {
   return new Date(ts).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 }
 
-async function addToCalendar(idea) {
-  if (!idea.remindAt) { toast('Primero elija la fecha y hora del recordatorio.'); return; }
-  const body = (idea.summary || idea.text || '').slice(0, 900);
+/** Archivo de Calendario (.ics) con alarma a la hora del evento. */
+async function calendarFile({ uid: id, title, start, minutes = 30, description = '' }) {
   const ics = [
     'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//IdeaShel Vale//ES', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
     'BEGIN:VEVENT',
-    `UID:${idea.id}@ideashel-vale`,
+    `UID:${id}@ideashel-vale`,
     `DTSTAMP:${icsDate(Date.now())}`,
-    `DTSTART:${icsDate(idea.remindAt)}`,
-    `DTEND:${icsDate(idea.remindAt + 30 * 60000)}`,
-    `SUMMARY:${icsEscape('💡 ' + idea.title)}`,
-    `DESCRIPTION:${icsEscape(body + '\n\nAbra IdeaShel Vale para ver la idea completa.')}`,
-    'BEGIN:VALARM', 'TRIGGER:PT0M', 'ACTION:DISPLAY', `DESCRIPTION:${icsEscape(idea.title)}`, 'END:VALARM',
+    `DTSTART:${icsDate(start)}`,
+    `DTEND:${icsDate(start + minutes * 60000)}`,
+    `SUMMARY:${icsEscape(title)}`,
+    `DESCRIPTION:${icsEscape(description)}`,
+    'BEGIN:VALARM', 'TRIGGER:PT0M', 'ACTION:DISPLAY', `DESCRIPTION:${icsEscape(title)}`, 'END:VALARM',
     'END:VEVENT', 'END:VCALENDAR'
   ].join('\r\n');
   const blob = new Blob([ics], { type: 'text/calendar' });
-  await shareOrDownload(blob, `recordatorio-${normTag(idea.title).slice(0, 30) || 'idea'}.ics`, idea.title);
+  await shareOrDownload(blob, `recordatorio-${normTag(title).slice(0, 30) || 'idea'}.ics`, title);
+}
+
+async function addToCalendar(idea) {
+  if (!idea.remindAt) { toast('Primero elija la fecha y hora del recordatorio.'); return; }
+  const body = (idea.summary || idea.text || '').slice(0, 900);
+  await calendarFile({ uid: idea.id, title: '💡 ' + idea.title, start: idea.remindAt, minutes: 30, description: body + '\n\nAbra IdeaShel Vale para ver la idea completa.' });
+}
+
+// ---------------------------------------------------------------- plan de trabajo (conexión con la app)
+
+let planUI = null;
+const planSaveLater = debounce((plan) => { db.put('plans', plan).catch(storageFailed); }, 400);
+
+async function savePlan(plan, { now = false } = {}) {
+  if (!plan) return;
+  plan.updatedAt = Date.now();
+  if (now) {
+    try { await db.put('plans', plan); } catch (err) { storageFailed(err); }
+  } else {
+    planSaveLater(plan);
+  }
+}
+
+async function deletePlan(plan) {
+  try { await db.delete('plans', plan.id); } catch (err) { storageFailed(err); }
+}
+
+async function createIdeaFrom(text, title, remindAt) {
+  const idea = newIdea(text, null);
+  idea.title = title;
+  idea.titleAuto = false;
+  idea.remindAt = remindAt || null;
+  return (await persistIdea(idea, { touch: false })) ? idea.id : null;
+}
+
+function setupPlan() {
+  planUI = createPlanUI({
+    $, esc, state, openSheet, toast, dialog, confirmDialog, alertDialog, shareText, shareOrDownload, copyText,
+    setHead, greetingText, aiConfig, AI, mountChat, showAIError, setSetting, savePlan, deletePlan,
+    calendarFile, createIdeaFrom, openEditor: (id) => openEditor(id)
+  });
 }
 
 function checkDueReminders() {
@@ -2807,6 +2862,7 @@ async function buildBackup(withAudio) {
     ideas: state.ideas,
     categories: state.categories,
     // Nunca se exportan las claves de IA
+    plans: await db.getAll('plans'),
     settings: { theme: s.theme, voiceLang: s.voiceLang, backupEveryDays: s.backupEveryDays, sort: s.sort }
   };
 }
@@ -2943,6 +2999,15 @@ async function importBackup(file) {
         if (idx === -1) state.ideas.push(i); else state.ideas[idx] = i;
       }
       toast(toPut.length ? `Se importaron ${toPut.length} ideas.` : 'No había ideas nuevas en el respaldo.');
+    }
+    const plans = (Array.isArray(data.plans) ? data.plans : []).filter((x) => x && typeof x.id === 'string' && Array.isArray(x.activities));
+    for (const pl of plans) {
+      const cur = await db.get('plans', pl.id);
+      if (mode === 'replace' || !cur || (pl.updatedAt || 0) > (cur.updatedAt || 0)) await db.put('plans', pl);
+    }
+    if (plans.length) {
+      const all = await db.getAll('plans');
+      state.plan = all.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))[0] || null;
     }
     for (const a of audios) {
       if (mode === 'merge' && (await db.get('audio', a.id))) continue;
@@ -3385,6 +3450,7 @@ async function init() {
   applyTheme();
   setupCapture();
   setupSearch();
+  setupPlan();
   document.body.dataset.view = 'ideas';
   $('#menuBtn').addEventListener('click', openDrawer);
   $('#viewToggle').addEventListener('click', async () => {

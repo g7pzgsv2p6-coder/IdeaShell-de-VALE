@@ -62,6 +62,20 @@ App web instalable (PWA) para iPhone para capturar ideas por voz y organizarlas.
 - **Plantillas**: Reunión, Proyecto, Idea de negocio, Lista de compras, Diario y Estudio.
 - **Combinar ideas**: junta texto, nota, etiquetas, tareas y audio.
 
+### Novedades v1.3 (Plan de trabajo desde Excel)
+
+- Nueva pestaña **Plan**: importe su plan de trabajo en Excel (.xlsx). El archivo se lee **en el teléfono** (sin librerías ni servidores) y los datos quedan solo ahí.
+- Reconoce hojas de **Actividades**, **Entregables**, **Metas**, **Bitácora**, **Resumen** (frentes y pesos) y **Referencia** (semana tipo, reglas e insumos), y detecta feriados.
+- **Resumen**: anillo de avance ponderado (real vs. planificado), días transcurridos, indicadores, avance por frente, alertas y próximos entregables.
+- **Agenda** día a día con foco y rutina de la semana tipo, atrasadas arriba y check rápido.
+- **Calendario** mensual con colores por frente y ◆ entregables; **Semanas** con línea de tiempo tipo Gantt.
+- **Entregables** con cuenta regresiva, estado (pendiente, entregado, validado) y quién valida.
+- **Metas** real vs. meta con + y −; **Personas** con lo que depende de cada una.
+- **Bitácora** diaria que se completa sola con las actividades del día y se comparte en un toque.
+- **Reporte semanal** armado solo (y redacción mejorada con IA, opcional); **chat con la IA** sobre el plan.
+- Detalle de cada actividad: estado, % de avance, fecha real, bloqueos, reprogramar, recordatorio en el Calendario y crear una nota.
+- Actualizar con una nueva versión del Excel **manteniendo el avance**, exportar el avance a CSV (Excel) y respaldo incluido.
+
 ### IA opcional
 
 En **Ajustes → Inteligencia artificial** se elige el proveedor:
@@ -96,6 +110,8 @@ app/                  ← la app que se publica (rutas relativas)
   js/voice.js         ← reconocimiento de voz
   js/recorder.js      ← grabación de audio y conversión para la IA
   js/smart.js         ← fechas, tareas, ideas parecidas y categoría sugerida (sin internet)
+  js/plan.js          ← lector de Excel (.xlsx) y cálculos del plan de trabajo
+  js/plan-ui.js       ← pantallas del plan (resumen, agenda, calendario, semanas…)
   js/util.js
   icons/              ← íconos generados (192, 512, maskable, apple-touch 180)
 tools/                ← generador de íconos (logo original en tools/logo.mjs)
@@ -114,6 +130,7 @@ node tests/e2e.mjs
 
 # Video de demostración (IA simulada) en tamaño iPhone
 node tools/demo-video.mjs ./demo
+node tools/demo-plan-video.mjs mi-plan.xlsx ./demo   # demo del Plan con su propio Excel (queda en ./demo)
 
 # Regenerar íconos después de cambiar tools/logo.mjs
 node tools/generate-icons.mjs
@@ -132,6 +149,7 @@ Hecho:
 | 1.0 | Captura por voz y texto, categorías, etiquetas, búsqueda, respaldo, IA opcional (Gemini o Claude), PWA sin internet |
 | 1.1 | Grabaciones con audio, transcribir y organizar con IA, chat por nota y general, menú lateral, recordatorios, mosaico |
 | 1.2 | Diseño pastel, funciones inteligentes sin internet, Hoy, Tareas, Tablero, Plantillas, Combinar, Resumen semanal |
+| 1.3 | Plan de trabajo desde Excel: resumen, agenda, calendario, semanas, entregables, metas, personas, bitácora, reporte y reglas |
 
 Próximas mejoras sugeridas, en orden de prioridad:
 
@@ -145,3 +163,5 @@ Próximas mejoras sugeridas, en orden de prioridad:
 | 6 | Exportar una nota como PDF para enviar | Medio | Medio | Nada |
 | 7 | Traducir una nota con IA | Bajo | Bajo | Clave de IA |
 | 8 | Sincronizar entre iPhone y computador | Alto | Alto | Un servicio en la nube (deja de ser 100 % local) |
+
+> **Privacidad del Plan:** el repositorio es público, por eso aquí no hay datos reales de ningún plan. Las pruebas usan un plan ficticio que genera `tests/make-plan-fixture.py`. Su Excel se carga directamente en la app del teléfono.
