@@ -2,7 +2,7 @@
 
 App web instalable (PWA) para iPhone para capturar ideas por voz y organizarlas. Funciona sola: no depende de ningún servidor propio, todo queda guardado en el teléfono (IndexedDB) y abre sin internet.
 
-**Enlace (una vez activado GitHub Pages):** https://g7pzgsv2p6-coder.github.io/IdeaShell-de-VALE/
+**Enlace actual:** https://appevale.netlify.app (publicada en Netlify subiendo el zip de la carpeta `app/`).
 
 ## Funciones
 
@@ -75,6 +75,12 @@ App web instalable (PWA) para iPhone para capturar ideas por voz y organizarlas.
 - **Reporte semanal** armado solo (y redacción mejorada con IA, opcional); **chat con la IA** sobre el plan.
 - Detalle de cada actividad: estado, % de avance, fecha real, bloqueos, reprogramar, recordatorio en el Calendario y crear una nota.
 - Actualizar con una nueva versión del Excel **manteniendo el avance**, exportar el avance a CSV (Excel) y respaldo incluido.
+
+### Novedades v1.4 (nuevo inicio, barra inferior y Calibri)
+
+- **Inicio con el plan primero**: saludo con su nombre, selector **Hoy · Semana · Mes**, tarjeta **Foco del día** (foco, rutina, actividades, entregables, modalidad y horario), **Siguiente** actividad con *Completar*, línea de tiempo **Hoy en el plan**, próximo entregable, **panel de avance** (anillo real vs. planificado), **frentes de trabajo** deslizables, **acciones rápidas** (grabar reunión, bitácora, reporte, preguntar a la IA), **próximos días** e **ideas recientes**.
+- **Barra inferior nueva**: Plan · Agenda · 🎙 Grabar (al centro) · Ideas · Más.
+- **Calibri en toda la app** (con Carlito incluida, la versión libre con las mismas medidas, para que se vea igual en el iPhone y sin internet).
 
 ### IA opcional
 
@@ -150,6 +156,7 @@ Hecho:
 | 1.1 | Grabaciones con audio, transcribir y organizar con IA, chat por nota y general, menú lateral, recordatorios, mosaico |
 | 1.2 | Diseño pastel, funciones inteligentes sin internet, Hoy, Tareas, Tablero, Plantillas, Combinar, Resumen semanal |
 | 1.3 | Plan de trabajo desde Excel: resumen, agenda, calendario, semanas, entregables, metas, personas, bitácora, reporte y reglas |
+| 1.4 | Nuevo inicio con el plan primero (Hoy, Semana, Mes), barra inferior con grabación al centro y Calibri en toda la app |
 
 Próximas mejoras sugeridas, en orden de prioridad:
 

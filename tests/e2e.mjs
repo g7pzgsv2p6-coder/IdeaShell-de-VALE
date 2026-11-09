@@ -167,9 +167,14 @@ try {
     viewport: document.querySelector('meta[name="viewport"]')?.content
   }));
   check('Meta tags de iOS', metas.capable === 'yes' && metas.title === 'IdeaShel Vale' && metas.viewport.includes('viewport-fit=cover'));
-  check('Botón de grabar visible en la barra inferior', await page.isVisible('#recBtn'));
-  check('Saludo en la pantalla de inicio', /Buen(os|as) (días|tardes|noches)/.test(await page.innerText('#greeting')));
+  check('Barra inferior: Plan primero y botón de grabar al centro', await page.isVisible('.tabbar2 .t2rec') && (await page.locator('.tabbar2 .t2').first().innerText()).includes('Plan'));
+  check('Saludo en la pantalla de inicio', /Buen(os|as) (días|tardes|noches)/.test(await page.innerText('.hm-hi')));
+  check('Calibri en toda la app (Carlito incluida)', (await page.evaluate(() => getComputedStyle(document.body).fontFamily)).startsWith('Calibri') && await page.evaluate(async () => { await document.fonts.ready; return document.fonts.check('16px Carlito'); }));
+  check('Inicio sin plan: invita a importar el Excel', await page.isVisible('.hm-import'));
   await shot('01-inicio.png');
+  await page.click('.tabbar2 [data-nav="ideas"]');
+  await page.waitForTimeout(300);
+  check('Botón de grabar en Ideas', await page.isVisible('#recBtn'));
 
   // ---------- agregar ideas escritas ----------
   const add = async (text, cat) => {
@@ -491,8 +496,12 @@ try {
   const carla2 = (await idb('ideas')).find((i) => i.id === carla.id);
   check('Agregar a la idea parecida (sin duplicar)', carla2.text.includes('revisar el presupuesto del proveedor\n\nLlamar a Carla'));
   await page.evaluate(() => window.scrollTo(0, 0));
-  check('Panel "Hoy" en el inicio (con el próximo recordatorio)', await page.isVisible('#todayPanel') && /próximo|recordatorio/i.test(await page.innerText('#todayPanel')));
-  await shot('15-hoy.png');
+  await page.click('.tabbar2 [data-nav="home"]');
+  await page.waitForTimeout(300);
+  check('Inicio sin plan muestra ideas recientes y acciones rápidas', await page.locator('.hm-list [data-hidea]').count() === 3 && await page.locator('.hm-q').count() === 4);
+  await shot('15-inicio-sin-plan.png');
+  await page.click('.tabbar2 [data-nav="ideas"]');
+  await page.waitForTimeout(300);
   await page.locator('.idea-card', { hasText: 'Carla' }).locator('.card-open').click();
   await page.waitForSelector('.sheet.editor');
   await page.waitForTimeout(400);
@@ -503,7 +512,7 @@ try {
   check('Agregar tareas detectadas con un toque', (await page.locator('.sheet.editor .steps li').count()) === 2);
   await closeEditor();
 
-  await page.click('.home-tabs [data-tab="tasks"]');
+  await go('tasks');
   await page.waitForTimeout(400);
   const groups = await page.locator('.task-group').count();
   check('Vista Tareas: pendientes agrupadas por idea', groups >= 2, `${groups} grupos`);
@@ -513,7 +522,7 @@ try {
   await page.waitForTimeout(600);
   check('Marcar tarea como hecha desde Tareas', (await idb('ideas')).find((i) => i.id === carla.id).steps.filter((x) => x.done).length === 1);
 
-  await page.click('.home-tabs [data-tab="board"]');
+  await go('board');
   await page.waitForTimeout(400);
   check('Vista Tablero con 3 columnas', (await page.locator('.board-col').count()) === 3);
   await page.locator('.col-nueva .board-card', { hasText: 'Carla' }).locator('[data-dir="1"]').click();
@@ -522,7 +531,7 @@ try {
   await page.evaluate(() => window.scrollTo(0, 0));
   await shot('18-tablero.png');
 
-  await page.click('.home-tabs [data-tab="ideas"]');
+  await page.click('.tabbar2 [data-nav="ideas"]');
   await page.waitForTimeout(300);
   await page.click('#tplBtn');
   await page.waitForSelector('.tpl-grid');
@@ -549,8 +558,7 @@ try {
   // ---------- plan de trabajo desde Excel (datos ficticios) ----------
   const planXlsx = join(site, 'plan-demo.xlsx');
   execFileSync('python3', [join(root, 'tests', 'make-plan-fixture.py'), planXlsx]);
-  await page.click('.home-tabs [data-tab="plan"]');
-  await page.waitForTimeout(300);
+  await go('plan');
   check('Plan: pantalla para importar el Excel', await page.isVisible('#planImport'));
   const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('#planImport')]);
   await chooser.setFiles(planXlsx);
@@ -645,12 +653,37 @@ try {
   await page.waitForTimeout(300);
   await page.reload();
   await ready();
-  await page.click('.home-tabs [data-tab="plan"]');
-  await page.waitForTimeout(400);
+  check('Al abrir, la app muestra el Inicio con el plan primero', await page.isVisible('.hm-focus') && await page.isVisible('.hm-panel'));
+  await go('plan');
   check('Plan: el avance queda guardado al recargar', await page.locator('.plan-hero').count() === 1 && (await page.innerText('#homeSub')).includes('avance'));
-  await page.click('.home-tabs [data-tab="ideas"]');
+  await page.click('.tabbar2 [data-nav="home"]');
+  await page.waitForTimeout(400);
+  check('Inicio: foco del día, siguiente actividad, avance y frentes', await page.isVisible('.hm-focus') && await page.locator('.hm-front').count() === 3 && await page.locator('.hm-trio button').count() === 3);
+  await page.evaluate(() => { window.scrollTo(0, 0); document.getElementById('toast')?.classList.remove('show'); });
+  await shot('26-inicio-hoy.png');
+  await shot('26b-inicio-completo.png', { fullPage: true });
+  const hoyAct = await page.locator('.hm-acts [data-hcheck]').first().getAttribute('data-hcheck').catch(() => null);
+  if (hoyAct) {
+    const before = (await idb('plans'))[0].activities.find((a) => a.id === hoyAct).status;
+    await page.click(`.hm-acts [data-hcheck="${hoyAct}"]`);
+    await page.waitForTimeout(700);
+    const after = (await idb('plans'))[0].activities.find((a) => a.id === hoyAct).status;
+    check('Inicio: completar una actividad desde el inicio', before !== after);
+  }
+  await page.click('[data-range="semana"]');
   await page.waitForTimeout(300);
-  check('Panel Hoy muestra las actividades del plan', await page.locator('.today-card.plan-card').count() === 1);
+  check('Inicio: vista Semana (5 días)', await page.locator('.hm-day').count() === 5);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await shot('27-inicio-semana.png');
+  await page.click('[data-range="mes"]');
+  await page.waitForTimeout(300);
+  check('Inicio: vista Mes (calendario)', await page.locator('.hm-cell').count() >= 28 && !(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)));
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await shot('28-inicio-mes.png');
+  await page.click('[data-range="hoy"]');
+  await page.click('.tabbar2 [data-nav="agenda"]');
+  await page.waitForTimeout(300);
+  check('Barra: Agenda abre la agenda del plan', await page.locator('[data-sec="agenda"].on').count() === 1);
   await go('settings');
   const [dl2] = await Promise.all([page.waitForEvent('download'), page.click('#doExport')]);
   const bk2 = join(site, 'respaldo2.json');
@@ -688,6 +721,8 @@ try {
   await context.setOffline(true);
   await page.reload();
   await ready();
+  await page.click('.tabbar2 [data-nav="ideas"]');
+  await page.waitForTimeout(300);
   const offlineCards = await page.locator('.idea-card').count();
   check('Abre sin conexión con las ideas guardadas', offlineCards === 7 && await page.isVisible('#offlinePill'), `${offlineCards} ideas`);
   await page.locator('.idea-card.has-audio .card-open').click();
@@ -698,6 +733,8 @@ try {
   const cold = await context.newPage();
   await cold.goto(BASE);
   await cold.waitForFunction(() => document.documentElement.classList.contains('ready'));
+  await cold.click('.tabbar2 [data-nav="ideas"]');
+  await cold.waitForTimeout(300);
   check('Pestaña nueva sin conexión también abre', (await cold.locator('.idea-card').count()) === 7);
   await cold.close();
   await context.setOffline(false);
@@ -708,6 +745,8 @@ try {
   const p2page = await ctx2.newPage();
   await p2page.goto(BASE);
   await p2page.waitForFunction(() => document.documentElement.classList.contains('ready'));
+  await p2page.click('.tabbar2 [data-nav="ideas"]');
+  await p2page.waitForTimeout(300);
   check('Sin grabación disponible: oculta el botón y muestra aviso amable',
     !(await p2page.isVisible('#recBtn')) && (await p2page.innerText('#voiceUnavailable')).includes('micrófono del teclado'));
   await ctx2.close();

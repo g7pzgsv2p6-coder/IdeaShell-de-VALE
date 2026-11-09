@@ -1,7 +1,7 @@
 // Service worker de IdeaShel Vale: guarda la app en el teléfono para abrir sin internet.
 // BUILD se reemplaza automáticamente en cada despliegue (ver .github/workflows/pages.yml).
 const BUILD = 'dev';
-const CACHE = `chispa-1.3.0-${BUILD}`;
+const CACHE = `chispa-1.4.0-${BUILD}`;
 
 const ASSETS = [
   './',
@@ -17,6 +17,9 @@ const ASSETS = [
   './js/smart.js',
   './js/plan.js',
   './js/plan-ui.js',
+  './fonts/carlito-latin-400-normal.woff2',
+  './fonts/carlito-latin-700-normal.woff2',
+  './fonts/carlito-latin-400-italic.woff2',
   './icons/favicon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',

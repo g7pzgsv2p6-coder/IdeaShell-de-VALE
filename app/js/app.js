@@ -3,7 +3,8 @@ import { db, loadSettings, saveSetting } from './db.js';
 import * as AI from './ai.js';
 import { Dictation, voiceSupported, voiceErrorMessage, VOICE_LANGS } from './voice.js';
 import { createPlanUI } from './plan-ui.js';
-import { planStats, todayYmd } from './plan.js';
+import { planStats, todayYmd, focusFor, isLate as planIsLate, weeksOf, addDays as planAddDays, fromYmd, frontOf, diffDays as planDiffDays, ymd as toYmdStr } from './plan.js';
+import { fmtDay, fmtLong } from './plan-ui.js';
 import { parseDateES, extractTasks, relatedIdeas, findDuplicate, suggestCategory } from './smart.js';
 import { AudioRecorder, audioSupported, micErrorMessage, fmtDuration, toWavChunks, blobToBase64, base64ToBlob } from './recorder.js';
 import {
@@ -11,7 +12,7 @@ import {
   fmtFull, fmtShortDate, fmtRelative, daysBetween, stamp
 } from './util.js';
 
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 const TRASH_DAYS = 30;
 
 const DEFAULT_CATEGORIES = [
@@ -59,7 +60,9 @@ const state = {
   categories: [],
   settings: { ...DEFAULT_SETTINGS },
   filters: { q: '', category: 'all', tag: '', fav: false, status: '', archived: false, audio: false, scheduled: false },
-  view: 'ideas',
+  view: 'home',
+  homeRange: 'hoy',
+  homeDay: null,
   storageOk: true,
   persisted: null,
   randomId: null,
@@ -351,6 +354,8 @@ function setView(view) {
   document.body.dataset.view = view;
   $$('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${view}`));
   document.querySelectorAll('.home-tabs [data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === view)));
+  updateNav();
+  if (view === 'home') renderHome();
   if (view === 'ideas') renderIdeas();
   if (view === 'tasks') renderTasks();
   if (view === 'board') renderBoard();
@@ -362,6 +367,7 @@ function setView(view) {
 
 /** Re-dibuja la vista abierta (después de cambios hechos desde una hoja o el menú). */
 function refreshView() {
+  if (state.view === 'home' && !document.querySelector('.sheet.recorder')) renderHome();
   if (state.view === 'ideas') renderIdeas();
   if (state.view === 'tasks') renderTasks();
   if (state.view === 'board') renderBoard();
@@ -963,11 +969,22 @@ function renderChips() {
   $('#catChips').innerHTML = chips.join('');
 }
 
-function greetingText() {
+function greetingBase() {
   const h = new Date().getHours();
-  const base = h < 6 ? 'Buenas noches' : h < 13 ? 'Buenos días' : h < 20 ? 'Buenas tardes' : 'Buenas noches';
-  const name = (state.settings.userName || '').trim();
-  return name ? `${base}, ${name}` : base;
+  return h < 6 ? 'Buenas noches' : h < 13 ? 'Buenos días' : h < 20 ? 'Buenas tardes' : 'Buenas noches';
+}
+
+/** Nombre para el saludo: el de Ajustes o, si no hay, el primer nombre de la prestadora del plan. */
+function greetingName() {
+  const n = (state.settings.userName || '').trim();
+  if (n) return n;
+  const who = state.plan && (state.plan.info || []).find((i) => /prestador|responsable|nombre/i.test(i.label));
+  return who ? who.value.split(/[·,(]/)[0].trim().split(/\s+/)[0] : '';
+}
+
+function greetingText() {
+  const name = greetingName();
+  return name ? `${greetingBase()}, ${name}` : greetingBase();
 }
 
 function filterTitle() {
@@ -993,7 +1010,7 @@ function renderIdeas() {
   const list = filteredIdeas();
   const f = state.filters;
   const grid = state.settings.viewMode !== 'list';
-  renderToday();
+  $('#todayPanel').hidden = true; // el resumen del día ahora vive en el Inicio
   const ft = filterTitle();
   $('#greeting').textContent = ft || greetingText();
   const all = activeIdeas().filter((i) => !i.archived);
@@ -1717,6 +1734,267 @@ async function shareIdea(idea) {
   }
 }
 
+// ---------------------------------------------------------------- INICIO (el plan primero)
+
+function updateNav() {
+  const map = { home: 'home', plan: 'agenda', ideas: 'ideas' };
+  const on = map[state.view] || 'more';
+  document.querySelectorAll('.tabbar2 [data-nav]').forEach((b) => {
+    const active = b.dataset.nav === on;
+    b.classList.toggle('on', active);
+    if (b.classList.contains('t2')) { if (active) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); }
+  });
+}
+
+function setupNav() {
+  document.querySelectorAll('.tabbar2 [data-nav]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const k = b.dataset.nav;
+      if (k === 'home') setView('home');
+      if (k === 'agenda') { state.planSection = 'agenda'; setView('plan'); }
+      if (k === 'record') openRecorder();
+      if (k === 'ideas') goIdeas();
+      if (k === 'more') openDrawer();
+    });
+  });
+  $('#topMenuBtn')?.addEventListener('click', openDrawer);
+}
+
+const capFirst = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+
+function homeRing(real, planned) {
+  const C1 = 2 * Math.PI * 50;
+  const C2 = 2 * Math.PI * 38;
+  return `<svg viewBox="0 0 120 120" aria-hidden="true">
+    <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="9"/>
+    ${planned > 0.004 ? `<circle cx="60" cy="60" r="50" fill="none" stroke="rgba(205,185,246,.6)" stroke-width="9" stroke-linecap="round" stroke-dasharray="${(planned * C1).toFixed(1)} ${C1.toFixed(1)}" transform="rotate(-90 60 60)"/>` : ''}
+    <circle cx="60" cy="60" r="38" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="10"/>
+    ${real > 0.004 ? `<circle cx="60" cy="60" r="38" fill="none" stroke="#F6B6D3" stroke-width="10" stroke-linecap="round" stroke-dasharray="${(real * C2).toFixed(1)} ${C2.toFixed(1)}" transform="rotate(-90 60 60)"/>` : ''}
+  </svg>`;
+}
+
+/** Hora escrita en el título de una actividad, por ejemplo "(09:00, 30 min)". */
+function timeIn(text) {
+  const m = String(text || '').match(/\b(\d{1,2}:\d{2})\b/);
+  return m ? m[1] : '';
+}
+
+function homeActRow(p, a, { showTime = true } = {}) {
+  const f = frontOf(p, a.front);
+  const t = showTime ? timeIn(a.title) : '';
+  return `<li class="hm-act ${a.status === 'Completada' ? 'done' : ''}" style="--c:${esc(f.color)}">
+    <button type="button" class="hm-check ${a.status === 'Completada' ? 'on' : ''}" data-hcheck="${esc(a.id)}" aria-label="${a.status === 'Completada' ? 'Marcar pendiente' : 'Marcar completada'}"></button>
+    <button type="button" class="hm-act-main" data-hact="${esc(a.id)}">
+      <span class="hm-act-title">${esc(a.title)}</span>
+      <span class="hm-act-meta"><span class="hm-chip" style="--c:${esc(f.color)}">${esc(f.code || '—')}</span>${a.with ? esc(a.with) : esc(f.name)}${t ? ` · ${esc(t)}` : ''}${planIsLate(a) ? ' · <b class="hm-late">atrasada</b>' : ''}</span>
+    </button>
+  </li>`;
+}
+
+function homeDayList(p, d) {
+  const acts = p.activities.filter((a) => a.date === d);
+  const dels = p.deliverables.filter((x) => x.date === d);
+  if (!acts.length && !dels.length) return `<p class="hm-empty">${p.holidays.includes(d) ? '🎌 Feriado' : 'Sin actividades del plan este día.'}</p>`;
+  return `<ul class="hm-acts">${acts.map((a) => homeActRow(p, a)).join('')}</ul>
+    ${dels.map((x) => `<button type="button" class="hm-due" data-hdel="${esc(x.id)}"><span class="hm-due-ic">📦</span><span><small>Entregable ${esc(x.id)}</small>${esc(x.name)}</span><span class="hm-pill ${x.status === 'Pendiente' ? '' : 'ok'}">${esc(x.status)}</span></button>`).join('')}`;
+}
+
+function renderHome() {
+  const view = $('#view-home');
+  const p = state.plan;
+  const today = todayYmd();
+  const name = greetingName();
+  const ideas = activeIdeas().filter((i) => !i.archived).sort((a, b) => b.createdAt - a.createdAt);
+  const cfg = aiConfig();
+  const header = `
+    <header class="hm-top">
+      <div><p class="hm-hi">${esc(greetingBase())}</p><h1 class="hm-name">${esc(name || 'Bienvenida')}</h1></div>
+      <button type="button" class="hm-avatar" data-h="settings" aria-label="Ajustes">${esc((name || 'V').charAt(0).toUpperCase())}</button>
+    </header>`;
+  const actions = (withPlan) => `
+    <div class="hm-sec"><h2>Acciones rápidas</h2></div>
+    <div class="hm-quick">
+      <button type="button" class="hm-q main" data-h="record"><span class="hm-qi"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 15a3.5 3.5 0 0 0 3.5-3.5v-6a3.5 3.5 0 1 0-7 0v6A3.5 3.5 0 0 0 12 15Z"/><path d="M18.5 11.5a6.5 6.5 0 0 1-13 0M12 18v3" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg></span>Grabar reunión</button>
+      ${withPlan ? '<button type="button" class="hm-q" data-h="log"><span class="hm-qi">📝</span>Bitácora de hoy</button>' : '<button type="button" class="hm-q" data-h="import"><span class="hm-qi">📋</span>Importar plan</button>'}
+      ${withPlan ? '<button type="button" class="hm-q" data-h="report"><span class="hm-qi">📨</span>Reporte semanal</button>' : '<button type="button" class="hm-q" data-h="idea"><span class="hm-qi">💡</span>Nueva idea</button>'}
+      <button type="button" class="hm-q" data-h="ask"><span class="hm-qi">💬</span>Preguntar a la IA</button>
+    </div>`;
+  const recent = ideas.length ? `
+    <div class="hm-sec"><h2>Ideas recientes</h2><button type="button" class="hm-link" data-h="ideas">Ver todas</button></div>
+    <ul class="hm-list card">${ideas.slice(0, 3).map((i) => `<li><button type="button" data-hidea="${esc(i.id)}"><span class="hm-li-ic">${i.audio ? '🎙' : '💡'}</span><span class="hm-li-t">${esc(i.title)}</span><span class="hm-li-r">${esc(fmtRelative(i.createdAt))}</span></button></li>`).join('')}</ul>` : '';
+
+  if (!p) {
+    view.innerHTML = `${header}
+      <div class="hm-import">
+        <p class="hm-eyebrow">${esc(capFirst(new Intl.DateTimeFormat('es-CL', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date())))}</p>
+        <h2>Organice su trabajo aquí</h2>
+        <p>Importe su plan de trabajo en Excel y verá cada día su foco, actividades, entregables y avance.</p>
+        <button type="button" class="btn primary full-w" data-h="import">Importar plan (Excel)</button>
+      </div>
+      ${actions(false)}${recent}`;
+    wireHome(view, null);
+    return;
+  }
+
+  const st = planStats(p);
+  const range = state.homeRange || 'hoy';
+  const seg = `<div class="hm-seg" role="tablist" aria-label="Rango">${[['hoy', 'Hoy'], ['semana', 'Semana'], ['mes', 'Mes']].map(([k, l]) => `<button type="button" role="tab" aria-selected="${range === k}" class="${range === k ? 'on' : ''}" data-range="${k}">${l}</button>`).join('')}</div>`;
+  let main = '';
+
+  if (range === 'hoy') {
+    const acts = p.activities.filter((a) => a.date === today);
+    const done = acts.filter((a) => a.status === 'Completada').length;
+    const focus = focusFor(p, today);
+    const [focusTitle, ...focusRest] = focus ? focus.focus.split(':') : ['Sin actividades programadas'];
+    const regime = (p.info.find((i) => /r[eé]gimen|horario/i.test(i.label)) || {}).value || '';
+    const hours = (regime.match(/\d{1,2}:\d{2}\s*[–-]\s*\d{1,2}:\d{2}/) || [''])[0];
+    const modes = [...new Set(acts.map((a) => a.mode).filter(Boolean))];
+    const dueToday = p.deliverables.filter((d) => d.date === today && d.status === 'Pendiente');
+    const late = p.activities.filter((a) => planIsLate(a));
+    const next = [...late, ...acts].find((a) => a.status !== 'Completada');
+    const upcomingDel = p.deliverables.filter((d) => d.status === 'Pendiente' && d.date >= today)[0];
+    const nextDays = [...new Set(p.activities.filter((a) => a.date > today).map((a) => a.date))].slice(0, 3);
+    main = `
+      <section class="hm-focus">
+        <p class="hm-eyebrow light">${esc(capFirst(fmtLong(today)))} · Día ${st.elapsed} de ${st.totalDays}</p>
+        <h2 class="hm-focus-title">${acts.length ? esc(focusTitle.trim()) : 'Hoy no hay actividades del plan'}</h2>
+        ${acts.length && focusRest.length ? `<p class="hm-focus-sub">${esc(capFirst(focusRest.join(':').trim()))}</p>` : ''}
+        ${focus && focus.routine && acts.length ? `<p class="hm-focus-sub">⏱ ${esc(focus.routine)}</p>` : ''}
+        <div class="hm-facts">
+          <span>☑ ${acts.length} ${acts.length === 1 ? 'actividad' : 'actividades'}</span>
+          ${dueToday.length ? `<span>📦 ${dueToday.length} ${dueToday.length === 1 ? 'entregable hoy' : 'entregables hoy'}</span>` : ''}
+          ${modes.length ? `<span>${modes.some((m) => /remot/i.test(m)) ? '🏠' : '🏭'} ${esc(modes.join(' / '))}${hours && !modes.some((m) => /remot/i.test(m)) ? ` · ${esc(hours)}` : ''}</span>` : ''}
+        </div>
+        ${acts.length ? `<div class="hm-focus-prog"><div class="hm-bar"><span style="width:${Math.round((done / acts.length) * 100)}%"></span></div><span>${done} de ${acts.length} listas</span></div>` : ''}
+      </section>
+
+      ${next ? `<section class="card hm-next">
+        <p class="hm-eyebrow">${planIsLate(next) ? 'Pendiente atrasada' : 'Siguiente'}</p>
+        <h3>${esc(next.title)}</h3>
+        <p class="hm-next-meta"><span class="hm-chip" style="--c:${esc(frontOf(p, next.front).color)}">${esc(frontOf(p, next.front).code)}</span>${next.with ? `con ${esc(next.with)}` : esc(frontOf(p, next.front).name)}${next.deliverable ? ` · ${esc(next.deliverable)}` : ''}</p>
+        <div class="hm-btns"><button type="button" class="btn primary" data-hcheck="${esc(next.id)}">✓ Completar</button><button type="button" class="btn soft" data-hact="${esc(next.id)}">Ver detalle</button></div>
+      </section>` : acts.length ? '<p class="hm-alldone">✨ ¡Todo lo de hoy está listo!</p>' : ''}
+
+      ${acts.length ? `<div class="hm-sec"><h2>Hoy en el plan</h2><button type="button" class="hm-link" data-h="agenda">Ver agenda</button></div>
+        <ul class="hm-acts timeline">${acts.map((a) => homeActRow(p, a)).join('')}</ul>` : ''}
+
+      ${upcomingDel ? (() => { const dd = planDiffDays(today, upcomingDel.date); const txt = dd === 0 ? 'Hoy' : dd === 1 ? 'Mañana' : `En ${dd} días`; return `
+        <button type="button" class="card hm-due big" data-hdel="${esc(upcomingDel.id)}"><span class="hm-due-ic">📦</span><span><small>${dd === 0 ? 'Vence hoy' : 'Próximo entregable'}</small>${esc(upcomingDel.name)}</span><span class="hm-pill ${dd === 0 ? 'hot' : dd <= 2 ? 'soon' : ''}">${txt}</span></button>`; })() : ''}
+
+      <button type="button" class="hm-panel" data-h="resumen">
+        <span class="hm-ring">${homeRing(st.real, st.planned)}<span class="hm-ring-n">${Math.round(st.real * 100)}%<small>REAL</small></span></span>
+        <span class="hm-panel-txt"><small>Avance ponderado</small><b>${Math.round(st.real * 100)} % de ${Math.round(st.planned * 100)} % planificado</b><em class="${st.real - st.planned < -0.05 ? 'bad' : ''}">${st.real - st.planned < -0.05 ? `⚠️ ${Math.round((st.planned - st.real) * 100)} puntos bajo lo planificado` : '✓ Al día con lo planificado'}</em></span>
+      </button>
+      <div class="hm-trio">
+        <button type="button" data-h="agenda"><b>${st.acts.today}</b><span>actividades hoy</span></button>
+        <button type="button" data-h="agenda" class="${st.acts.late ? 'bad' : ''}"><b>${st.acts.late}</b><span>atrasadas</span></button>
+        <button type="button" data-h="entregables" class="${st.del.soon ? 'warn' : ''}"><b>${st.del.soon}</b><span>entregables en 7 días</span></button>
+      </div>
+
+      ${nextDays.length ? `<div class="hm-sec"><h2>Próximos días</h2><button type="button" class="hm-link" data-range="mes">Calendario</button></div>
+        <ul class="hm-list card">${nextDays.map((d) => { const list = p.activities.filter((a) => a.date === d); const dt = fromYmd(d); return `<li><button type="button" data-hday="${d}"><span class="hm-date"><b>${dt.getDate()}</b><small>${esc(fmtDay(d).split(' ')[0].replace(',', ''))}</small></span><span class="hm-li-t">${esc(list[0].title)}</span><span class="hm-li-r">${list.length} act.</span></button></li>`; }).join('')}</ul>` : ''}`;
+  } else if (range === 'semana') {
+    const weeks = weeksOf(p);
+    const w = weeks.find((x) => today >= planAddDays(x.from, -((fromYmd(x.from).getDay() + 6) % 7)) && today <= planAddDays(x.from, 6 - ((fromYmd(x.from).getDay() + 6) % 7))) || (today < p.start ? weeks[0] : weeks[weeks.length - 1]);
+    const monday = planAddDays(w.from, -((fromYmd(w.from).getDay() + 6) % 7));
+    const days = [0, 1, 2, 3, 4].map((i) => planAddDays(monday, i));
+    const sel = state.homeDay && days.includes(state.homeDay) ? state.homeDay : (days.includes(today) ? today : days[0]);
+    const done = w.acts.filter((a) => a.status === 'Completada').length;
+    const dels = p.deliverables.filter((d) => d.date >= days[0] && d.date <= days[4]).length;
+    main = `
+      <p class="hm-eyebrow">Semana ${w.n} de ${weeks.length} · ${esc(fmtDay(days[0]))} – ${esc(fmtDay(days[4]))}</p>
+      <div class="hm-week">${days.map((d) => {
+        const list = p.activities.filter((a) => a.date === d);
+        const fr = [...new Set(list.map((a) => a.front))].slice(0, 4);
+        return `<button type="button" class="hm-day ${d === sel ? 'on' : ''} ${d === today ? 'today' : ''}" data-hday="${d}"><small>${esc(fmtDay(d).split(' ')[0].replace(',', ''))}</small><b>${fromYmd(d).getDate()}</b><span>${fr.map((f) => `<i style="background:${esc(frontOf(p, f).color)}"></i>`).join('')}</span></button>`;
+      }).join('')}</div>
+      <div class="hm-sec"><h2>${esc(capFirst(fmtLong(sel)))}</h2></div>
+      ${homeDayList(p, sel)}
+      <div class="hm-weekbar"><span>Semana</span><div class="hm-bar"><span style="width:${Math.round((done / w.acts.length) * 100)}%"></span></div><span>${done}/${w.acts.length} · ${dels} ${dels === 1 ? 'entregable' : 'entregables'}</span></div>`;
+  } else {
+    const base = state.homeMonth ? fromYmd(state.homeMonth) : (today >= p.start && today <= p.end ? fromYmd(today) : fromYmd(p.start));
+    const first = new Date(base.getFullYear(), base.getMonth(), 1);
+    const offset = (first.getDay() + 6) % 7;
+    const daysIn = new Date(base.getFullYear(), base.getMonth() + 1, 0).getDate();
+    const sel = state.homeDay && state.homeDay.slice(0, 7) === toYmdStr(first).slice(0, 7) ? state.homeDay : (today.slice(0, 7) === toYmdStr(first).slice(0, 7) ? today : toYmdStr(first));
+    const cells = [];
+    for (let i = 0; i < offset; i++) cells.push('<span></span>');
+    for (let dn = 1; dn <= daysIn; dn++) {
+      const d = toYmdStr(new Date(base.getFullYear(), base.getMonth(), dn));
+      const list = p.activities.filter((a) => a.date === d);
+      const fr = [...new Set(list.map((a) => a.front))].slice(0, 3);
+      const hasDel = p.deliverables.some((x) => x.date === d);
+      cells.push(`<button type="button" class="hm-cell ${d === today ? 'today' : ''} ${d === sel ? 'sel' : ''} ${d < p.start || d > p.end ? 'out' : ''} ${p.holidays.includes(d) ? 'hol' : ''}" data-hday="${d}"><b>${dn}</b><span>${fr.map((f) => `<i style="background:${esc(frontOf(p, f).color)}"></i>`).join('')}</span>${hasDel ? '<em>◆</em>' : ''}</button>`);
+    }
+    const prevM = toYmdStr(new Date(base.getFullYear(), base.getMonth() - 1, 1));
+    const nextM = toYmdStr(new Date(base.getFullYear(), base.getMonth() + 1, 1));
+    main = `
+      <div class="hm-month-head"><button type="button" class="icon-btn small" data-month="${prevM}" aria-label="Mes anterior">‹</button><h2>${esc(capFirst(new Intl.DateTimeFormat('es-CL', { month: 'long', year: 'numeric' }).format(first)))}</h2><button type="button" class="icon-btn small" data-month="${nextM}" aria-label="Mes siguiente">›</button></div>
+      <div class="card hm-month"><div class="hm-grid">${['L', 'M', 'M', 'J', 'V', 'S', 'D'].map((x) => `<small>${x}</small>`).join('')}${cells.join('')}</div></div>
+      <div class="hm-sec"><h2>${esc(capFirst(fmtLong(sel)))}</h2></div>
+      ${homeDayList(p, sel)}`;
+  }
+
+  const fronts = st.fronts.filter((f) => f.count);
+  const frontsHtml = `
+    <div class="hm-sec"><h2>Frentes de trabajo</h2><button type="button" class="hm-link" data-h="resumen">Ver todos</button></div>
+    <div class="hm-fronts">${fronts.map((f) => {
+      const nx = p.activities.find((a) => a.front === f.code && a.status !== 'Completada' && a.date >= today) || p.activities.find((a) => a.front === f.code && a.status !== 'Completada');
+      return `<button type="button" class="hm-front" style="--c:${esc(f.color)}" data-h="resumen"><small>${esc(f.code)} · ${Math.round(f.weight * 100)} %</small><b>${esc(f.name)}</b><span class="hm-bar thin"><span style="width:${Math.max(2, Math.round(f.real * 100))}%"></span></span><em>${nx ? `${nx.date === today ? 'Hoy' : esc(capFirst(fmtDay(nx.date)))}: ${esc(nx.title)}` : 'Todo listo ✓'}</em></button>`;
+    }).join('')}</div>`;
+
+  view.innerHTML = `${header}${seg}${main}${frontsHtml}${actions(true)}${recent}`;
+  wireHome(view, p);
+}
+
+function wireHome(view, p) {
+  view.onclick = async (e) => {
+    const t = e.target;
+    const range = t.closest('[data-range]');
+    if (range) { state.homeRange = range.dataset.range; state.homeDay = null; renderHome(); window.scrollTo({ top: 0 }); return; }
+    const month = t.closest('[data-month]');
+    if (month) { state.homeMonth = month.dataset.month; state.homeDay = null; renderHome(); return; }
+    const day = t.closest('[data-hday]');
+    if (day) {
+      state.homeDay = day.dataset.hday;
+      if (state.homeRange === 'hoy') state.homeRange = 'semana';
+      if (p && state.homeRange === 'semana' && !weeksOf(p).some(() => true)) state.homeRange = 'mes';
+      renderHome();
+      return;
+    }
+    const chk = t.closest('[data-hcheck]');
+    if (chk && p) {
+      const a = p.activities.find((x) => x.id === chk.dataset.hcheck);
+      if (a.status === 'Completada') { a.status = 'Pendiente'; a.progress = 0; a.realDate = null; }
+      else { a.status = 'Completada'; a.progress = 100; a.realDate = todayYmd(); toast('¡Actividad completada! ✓'); }
+      savePlan(p);
+      renderHome();
+      return;
+    }
+    const act = t.closest('[data-hact]');
+    if (act && p) { planUI.openActivity(p, act.dataset.hact); return; }
+    const del = t.closest('[data-hdel]');
+    if (del && p) { planUI.openDeliverable(p, del.dataset.hdel); return; }
+    const idea = t.closest('[data-hidea]');
+    if (idea) { openEditor(idea.dataset.hidea); return; }
+    const h = t.closest('[data-h]');
+    if (!h) return;
+    const k = h.dataset.h;
+    if (k === 'settings') setView('settings');
+    if (k === 'record') openRecorder();
+    if (k === 'ideas') goIdeas();
+    if (k === 'idea') { goIdeas(); setTimeout(() => $('#newText').focus(), 200); }
+    if (k === 'import') { state.planSection = 'resumen'; setView('plan'); setTimeout(() => planUI.ensureFileInput().click(), 50); }
+    if (['agenda', 'resumen', 'entregables'].includes(k)) { state.planSection = k; setView('plan'); }
+    if (k === 'log') { state.planSection = 'bitacora'; setView('plan'); }
+    if (k === 'report') { state.planSection = 'reporte'; setView('plan'); }
+    if (k === 'ask') {
+      if (!aiConfig()) { setView('settings'); toast('Configure una clave de IA (Gemini es gratis) para preguntar.'); return; }
+      if (p) planUI.openPlanChat(p); else openAskAll();
+    }
+  };
+}
+
 // ---------------------------------------------------------------- panel "Hoy"
 
 function pendingTasks() {
@@ -2391,7 +2669,8 @@ function setupPlan() {
   planUI = createPlanUI({
     $, esc, state, openSheet, toast, dialog, confirmDialog, alertDialog, shareText, shareOrDownload, copyText,
     setHead, greetingText, aiConfig, AI, mountChat, showAIError, setSetting, savePlan, deletePlan,
-    calendarFile, createIdeaFrom, openEditor: (id) => openEditor(id)
+    calendarFile, createIdeaFrom, openEditor: (id) => openEditor(id),
+    onChange: () => { if (state.view === 'home') renderHome(); }
   });
 }
 
@@ -3451,8 +3730,8 @@ async function init() {
   setupCapture();
   setupSearch();
   setupPlan();
-  document.body.dataset.view = 'ideas';
-  $('#menuBtn').addEventListener('click', openDrawer);
+  setupNav();
+  document.body.dataset.view = 'home';
   $('#viewToggle').addEventListener('click', async () => {
     await setSetting('viewMode', state.settings.viewMode === 'list' ? 'grid' : 'list');
     if (state.view !== 'ideas') setView('ideas'); else renderIdeas();
@@ -3463,6 +3742,7 @@ async function init() {
     if (f) await importBackup(f);
   });
   renderIdeas();
+  setView('home');
   setupOnline();
   registerSW();
   if (state.storageOk) {

@@ -572,7 +572,7 @@ export function createPlanUI(ctx) {
       full: true,
       label: 'Bitácora',
       className: 'log-sheet',
-      onClose: () => render(),
+      onClose: () => { render(); if (ctx.onChange) ctx.onChange(); },
       html: `
         <div class="sheet-head"><button type="button" class="btn ghost back" data-close>‹ Listo</button><strong>Bitácora · ${esc(fmtDay(l.date))}</strong><span></span></div>
         <div class="sheet-body">
@@ -686,7 +686,7 @@ export function createPlanUI(ctx) {
     const s = ctx.openSheet({
       label: 'Actividad',
       className: 'act-sheet',
-      onClose: () => render(),
+      onClose: () => { render(); if (ctx.onChange) ctx.onChange(); },
       html: `
         <div class="sheet-grabber"></div>
         <p class="as-top"><span class="front-chip" style="--c:${esc(f.color)}">${esc(f.code)}</span> ${esc(f.name)} · ${esc(a.id)} · semana ${a.week}</p>
@@ -749,7 +749,7 @@ export function createPlanUI(ctx) {
     const s = ctx.openSheet({
       label: 'Entregable',
       className: 'act-sheet',
-      onClose: () => render(),
+      onClose: () => { render(); if (ctx.onChange) ctx.onChange(); },
       html: `
         <div class="sheet-grabber"></div>
         <p class="as-top"><span class="front-chip" style="--c:${esc(f.color)}">${esc(f.code)}</span> ${esc(f.name)} · ${esc(d.id)}</p>
@@ -822,5 +822,5 @@ export function createPlanUI(ctx) {
     });
   }
 
-  return { render, importFile, openActivity, ensureFileInput };
+  return { render, importFile, openActivity, openDeliverable, openPlanChat, ensureFileInput };
 }
