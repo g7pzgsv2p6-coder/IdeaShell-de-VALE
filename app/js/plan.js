@@ -466,7 +466,7 @@ export function planPeople(plan) {
   };
   plan.activities.forEach((a) => splitPeople(a.with).forEach((p) => add(p, 'acts', a)));
   plan.deliverables.forEach((d) => splitPeople(d.validatedBy).forEach((p) => add(p, 'dels', d)));
-  // "Mauricio" + "Mauricio Hernández" → una sola persona
+  // "Carlos" + "Carlos Rivas" → una sola persona
   const list = [...map.values()];
   for (const short of list) {
     if (short.name.includes(' ')) continue;

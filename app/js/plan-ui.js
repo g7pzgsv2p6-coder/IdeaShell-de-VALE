@@ -227,7 +227,7 @@ export function createPlanUI(ctx) {
 
       ${ctx.aiConfig() ? `<div class="card ai-card">
         <h2 class="card-title">💬 Pregúntele a la IA sobre su plan</h2>
-        <p class="muted">"¿Qué tengo esta semana con Matías?", "¿Qué entregables dependen de Daniela?", "¿Cómo priorizo el jueves?"</p>
+        <p class="muted">${(() => { const pp = planPeople(p); return esc(`"¿Qué tengo esta semana${pp[1] ? ` con ${pp[1].name}` : ''}?", "¿Qué entregables dependen de ${pp[0] ? pp[0].name : 'mi jefatura'}?", "¿Cómo priorizo el jueves?"`); })()}</p>
         <button type="button" class="btn primary full-w" id="planChat">Abrir chat del plan</button>
       </div>` : ''}
 
@@ -813,7 +813,10 @@ export function createPlanUI(ctx) {
     state.planChat = state.planChat || [];
     ctx.mountChat(s.el.querySelector('#planChatMount'), {
       history: state.planChat,
-      suggestions: ['¿Qué tengo que hacer hoy y qué es lo más importante?', '¿Qué tengo esta semana con Matías?', '¿Qué entregables vencen pronto y quién los valida?', '¿Voy atrasada en algo? ¿Qué priorizo?', 'Prepárame la reunión de planificación del lunes'],
+      suggestions: (() => {
+        const pp = planPeople(p);
+        return ['¿Qué tengo que hacer hoy y qué es lo más importante?', pp[1] ? `¿Qué tengo esta semana con ${pp[1].name}?` : '¿Qué tengo esta semana?', '¿Qué entregables vencen pronto y quién los valida?', '¿Voy atrasada en algo? ¿Qué priorizo?', 'Prepárame la reunión de planificación del lunes'];
+      })(),
       placeholder: 'Pregunte sobre su plan…',
       ask: (history) => ctx.AI.chatPlan(ctx.aiConfig(), planAsText(p), history)
     });

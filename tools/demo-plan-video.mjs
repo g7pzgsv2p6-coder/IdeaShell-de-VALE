@@ -131,7 +131,7 @@ await quiet();
 await wait(3000);
 await page.click('.log-sheet [data-close]');
 await wait(500);
-await sec('reporte', 'Reporte semanal listo para enviar a Daniela', 3400);
+await sec('reporte', 'Reporte semanal listo para enviar', 3400);
 await sec('reglas', 'Reglas y semana tipo, con el día de hoy destacado', 2800);
 await sec('resumen', 'Y puede preguntarle a la IA sobre su plan', 1200);
 await page.click('#planChat');
