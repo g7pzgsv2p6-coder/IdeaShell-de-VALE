@@ -658,14 +658,14 @@ try {
   check('Plan: el avance queda guardado al recargar', await page.locator('.plan-hero').count() === 1 && (await page.innerText('#homeSub')).includes('avance'));
   await page.click('.tabbar2 [data-nav="home"]');
   await page.waitForTimeout(400);
-  check('Inicio: foco del día, siguiente actividad, avance y frentes', await page.isVisible('.hm-focus') && await page.locator('.hm-front').count() === 3 && await page.locator('.hm-trio button').count() === 3);
+  check('Inicio: tarjeta del día, foco, siguiente, línea de tiempo, panel, avance por frente, entregable, metas y frentes', await page.isVisible('.hm-daycard') && await page.isVisible('.hm-focus') && await page.locator('.hm-tl-row').count() >= 1 && await page.locator('.hm-fbar').count() === 3 && await page.locator('.hm-duo .card').count() === 2 && await page.locator('.hm-front').count() === 3 && await page.locator('.hm-trio button').count() === 3);
   await page.evaluate(() => { window.scrollTo(0, 0); document.getElementById('toast')?.classList.remove('show'); });
   await shot('26-inicio-hoy.png');
   await shot('26b-inicio-completo.png', { fullPage: true });
-  const hoyAct = await page.locator('.hm-acts [data-hcheck]').first().getAttribute('data-hcheck').catch(() => null);
+  const hoyAct = await page.locator('.hm-tl [data-hcheck]').first().getAttribute('data-hcheck').catch(() => null);
   if (hoyAct) {
     const before = (await idb('plans'))[0].activities.find((a) => a.id === hoyAct).status;
-    await page.click(`.hm-acts [data-hcheck="${hoyAct}"]`);
+    await page.click(`.hm-tl [data-hcheck="${hoyAct}"]`);
     await page.waitForTimeout(700);
     const after = (await idb('plans'))[0].activities.find((a) => a.id === hoyAct).status;
     check('Inicio: completar una actividad desde el inicio', before !== after);

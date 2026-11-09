@@ -1849,41 +1849,67 @@ function renderHome() {
     const regime = (p.info.find((i) => /r[eé]gimen|horario/i.test(i.label)) || {}).value || '';
     const hours = (regime.match(/\d{1,2}:\d{2}\s*[–-]\s*\d{1,2}:\d{2}/) || [''])[0];
     const modes = [...new Set(acts.map((a) => a.mode).filter(Boolean))];
+    const remote = modes.some((m) => /remot/i.test(m));
     const dueToday = p.deliverables.filter((d) => d.date === today && d.status === 'Pendiente');
     const late = p.activities.filter((a) => planIsLate(a));
     const next = [...late, ...acts].find((a) => a.status !== 'Completada');
-    const upcomingDel = p.deliverables.filter((d) => d.status === 'Pendiente' && d.date >= today)[0];
+    const nextDel = p.deliverables.filter((d) => d.status === 'Pendiente' && d.date > today)[0] || p.deliverables.filter((d) => d.status === 'Pendiente' && d.date >= today)[0];
     const nextDays = [...new Set(p.activities.filter((a) => a.date > today).map((a) => a.date))].slice(0, 3);
+    const nextGoal = p.goals.filter((g) => g.real < g.meta && g.date).sort((x, y) => x.date.localeCompare(y.date))[0];
+    const dt = fromYmd(today);
+    const monthShort = new Intl.DateTimeFormat('es-CL', { month: 'short' }).format(dt).replace('.', '');
+    const weekday = capFirst(new Intl.DateTimeFormat('es-CL', { weekday: 'long' }).format(dt));
+    const pill = (date) => { const dd = planDiffDays(today, date); return dd <= 0 ? ['Hoy', 'hot'] : dd === 1 ? ['Mañana', 'soon'] : [`En ${dd} días`, dd <= 3 ? 'soon' : '']; };
     main = `
-      <section class="hm-focus">
-        <p class="hm-eyebrow light">${esc(capFirst(fmtLong(today)))} · Día ${st.elapsed} de ${st.totalDays}</p>
-        <h2 class="hm-focus-title">${acts.length ? esc(focusTitle.trim()) : 'Hoy no hay actividades del plan'}</h2>
-        ${acts.length && focusRest.length ? `<p class="hm-focus-sub">${esc(capFirst(focusRest.join(':').trim()))}</p>` : ''}
-        ${focus && focus.routine && acts.length ? `<p class="hm-focus-sub">⏱ ${esc(focus.routine)}</p>` : ''}
-        <div class="hm-facts">
-          <span>☑ ${acts.length} ${acts.length === 1 ? 'actividad' : 'actividades'}</span>
-          ${dueToday.length ? `<span>📦 ${dueToday.length} ${dueToday.length === 1 ? 'entregable hoy' : 'entregables hoy'}</span>` : ''}
-          ${modes.length ? `<span>${modes.some((m) => /remot/i.test(m)) ? '🏠' : '🏭'} ${esc(modes.join(' / '))}${hours && !modes.some((m) => /remot/i.test(m)) ? ` · ${esc(hours)}` : ''}</span>` : ''}
-        </div>
-        ${acts.length ? `<div class="hm-focus-prog"><div class="hm-bar"><span style="width:${Math.round((done / acts.length) * 100)}%"></span></div><span>${done} de ${acts.length} listas</span></div>` : ''}
+      <!-- Tarjeta del día (propuesta 6) -->
+      <section class="hm-daycard">
+        <div class="hm-daytile"><small>${esc(monthShort)}</small><b>${dt.getDate()}</b><span>${esc(weekday)}</span></div>
+        <ul class="hm-dayfacts">
+          <li><span class="hm-fi">☑</span><b>${acts.length}</b>${acts.length === 1 ? 'actividad del plan' : 'actividades del plan'}</li>
+          <li><span class="hm-fi">📦</span>${dueToday.length ? `<b>${dueToday.length}</b>${dueToday.length === 1 ? 'entregable vence hoy' : 'entregables vencen hoy'}` : 'Sin entregables hoy'}</li>
+          <li><span class="hm-fi">${remote ? '🏠' : '🏭'}</span>${acts.length ? `${esc(modes.join(' / ') || 'Presencial')}${hours && !remote ? ` · ${esc(hours)}` : ''}` : 'Día libre en el plan'}</li>
+        </ul>
+        <div class="hm-dayplan"><span>Plan</span><div class="hm-bar duo"><span class="pl" style="width:${Math.round(st.planned * 100)}%"></span><span class="re" style="width:${Math.round(st.real * 100)}%"></span></div><span>Día ${st.elapsed} de ${st.totalDays} · ${Math.round(st.real * 100)} %</span></div>
       </section>
+
+      <!-- Foco del día (propuesta 4) -->
+      ${acts.length ? `<section class="hm-focus">
+        <p class="hm-eyebrow light">Su foco de hoy</p>
+        <h2 class="hm-focus-title">${esc(focusTitle.trim())}</h2>
+        ${focusRest.length ? `<p class="hm-focus-sub">${esc(capFirst(focusRest.join(':').trim()))}</p>` : ''}
+        ${focus && focus.routine ? `<p class="hm-focus-sub">⏱ ${esc(focus.routine)}</p>` : ''}
+        <div class="hm-focus-prog"><div class="hm-bar"><span style="width:${Math.round((done / acts.length) * 100)}%"></span></div><span>${done} de ${acts.length} listas</span></div>
+      </section>` : `<section class="hm-focus calm"><p class="hm-eyebrow light">Hoy</p><h2 class="hm-focus-title">Sin actividades del plan</h2>${nextDays[0] ? `<p class="hm-focus-sub">Lo próximo es el ${esc(fmtLong(nextDays[0]))}.</p>` : ''}</section>`}
 
       ${next ? `<section class="card hm-next">
         <p class="hm-eyebrow">${planIsLate(next) ? 'Pendiente atrasada' : 'Siguiente'}</p>
         <h3>${esc(next.title)}</h3>
-        <p class="hm-next-meta"><span class="hm-chip" style="--c:${esc(frontOf(p, next.front).color)}">${esc(frontOf(p, next.front).code)}</span>${next.with ? `con ${esc(next.with)}` : esc(frontOf(p, next.front).name)}${next.deliverable ? ` · ${esc(next.deliverable)}` : ''}</p>
+        <p class="hm-next-meta"><span class="hm-chip" style="--c:${esc(frontOf(p, next.front).color)}">${esc(frontOf(p, next.front).code)}</span><span class="hm-ell">${next.with ? `con ${esc(next.with)}` : esc(frontOf(p, next.front).name)}${next.deliverable ? ` · ${esc(next.deliverable)}` : ''}</span></p>
         <div class="hm-btns"><button type="button" class="btn primary" data-hcheck="${esc(next.id)}">✓ Completar</button><button type="button" class="btn soft" data-hact="${esc(next.id)}">Ver detalle</button></div>
       </section>` : acts.length ? '<p class="hm-alldone">✨ ¡Todo lo de hoy está listo!</p>' : ''}
 
+      <!-- Hoy en el plan: línea de tiempo (propuesta 1) -->
       ${acts.length ? `<div class="hm-sec"><h2>Hoy en el plan</h2><button type="button" class="hm-link" data-h="agenda">Ver agenda</button></div>
-        <ul class="hm-acts timeline">${acts.map((a) => homeActRow(p, a)).join('')}</ul>` : ''}
+        <ol class="hm-tl">${acts.map((a, i) => {
+          const f = frontOf(p, a.front);
+          const t = timeIn(a.title) || (i === 0 && focus && timeIn(focus.routine) ? timeIn(focus.routine) : '');
+          return `<li class="hm-tl-row ${a.status === 'Completada' ? 'done' : ''}" style="--c:${esc(f.color)}">
+            <span class="hm-tl-time">${esc(t || a.id)}</span>
+            <button type="button" class="hm-tl-dot" data-hcheck="${esc(a.id)}" aria-label="${a.status === 'Completada' ? 'Marcar pendiente' : 'Marcar completada'}"></button>
+            <button type="button" class="hm-tl-main" data-hact="${esc(a.id)}">
+              <span class="hm-tl-title">${esc(a.title)}</span>
+              <span class="hm-tl-meta"><span class="hm-chip" style="--c:${esc(f.color)}">${esc(f.code || '—')}</span><span class="hm-ell">${esc(a.with || f.name)}${a.deliverable ? ` · ${esc(a.deliverable)}` : ''}</span>${planIsLate(a) ? '<b class="hm-late">atrasada</b>' : ''}</span>
+            </button>
+          </li>`;
+        }).join('')}</ol>` : ''}
 
-      ${upcomingDel ? (() => { const dd = planDiffDays(today, upcomingDel.date); const txt = dd === 0 ? 'Hoy' : dd === 1 ? 'Mañana' : `En ${dd} días`; return `
-        <button type="button" class="card hm-due big" data-hdel="${esc(upcomingDel.id)}"><span class="hm-due-ic">📦</span><span><small>${dd === 0 ? 'Vence hoy' : 'Próximo entregable'}</small>${esc(upcomingDel.name)}</span><span class="hm-pill ${dd === 0 ? 'hot' : dd <= 2 ? 'soon' : ''}">${txt}</span></button>`; })() : ''}
+      ${dueToday.map((d) => `<button type="button" class="hm-duecard" data-hdel="${esc(d.id)}"><span class="hm-due-ic">📦</span><span class="hm-duecard-txt"><small>Vence hoy</small><b>${esc(d.name)}</b></span><span class="hm-pill hot">Hoy</span></button>`).join('')}
 
+      <!-- Panel ejecutivo (propuesta 2) -->
+      <div class="hm-sec"><h2>Avance del plan</h2><button type="button" class="hm-link" data-h="resumen">Resumen</button></div>
       <button type="button" class="hm-panel" data-h="resumen">
         <span class="hm-ring">${homeRing(st.real, st.planned)}<span class="hm-ring-n">${Math.round(st.real * 100)}%<small>REAL</small></span></span>
-        <span class="hm-panel-txt"><small>Avance ponderado</small><b>${Math.round(st.real * 100)} % de ${Math.round(st.planned * 100)} % planificado</b><em class="${st.real - st.planned < -0.05 ? 'bad' : ''}">${st.real - st.planned < -0.05 ? `⚠️ ${Math.round((st.planned - st.real) * 100)} puntos bajo lo planificado` : '✓ Al día con lo planificado'}</em></span>
+        <span class="hm-panel-txt"><small>Avance ponderado</small><b>Día ${st.elapsed} de ${st.totalDays}</b>${(() => { const diff = Math.round((st.real - st.planned) * 100); return `<em class="${diff < -5 ? 'bad' : ''}">${diff < -5 ? `⚠️ ${-diff} puntos bajo lo planificado` : diff > 5 ? `🚀 ${diff} puntos adelantada` : `✓ Al día con lo planificado (${Math.round(st.planned * 100)} %)`}</em>`; })()}</span>
       </button>
       <div class="hm-trio">
         <button type="button" data-h="agenda"><b>${st.acts.today}</b><span>actividades hoy</span></button>
@@ -1891,8 +1917,30 @@ function renderHome() {
         <button type="button" data-h="entregables" class="${st.del.soon ? 'warn' : ''}"><b>${st.del.soon}</b><span>entregables en 7 días</span></button>
       </div>
 
+      <div class="hm-sec"><h2>Avance por frente</h2><button type="button" class="hm-link" data-h="resumen">Detalle</button></div>
+      <div class="card hm-fbars">${st.fronts.filter((f) => f.count).map((f) => `
+        <button type="button" class="hm-fbar" data-h="resumen" style="--c:${esc(f.color)}">
+          <span class="hm-chip" style="--c:${esc(f.color)}">${esc(f.code)}</span>
+          <span class="hm-fbar-mid"><span class="hm-fbar-name">${esc(f.name)}</span><span class="hm-bar duo"><span class="pl" style="width:${Math.round(f.planned * 100)}%"></span><span class="re" style="width:${Math.round(f.real * 100)}%"></span></span></span>
+          <span class="hm-fbar-w">${Math.round(f.weight * 100)} %</span>
+        </button>`).join('')}
+      </div>
+
+      <div class="hm-duo">
+        <button type="button" class="card" ${nextDel ? `data-hdel="${esc(nextDel.id)}"` : 'data-h="entregables"'}>
+          <small>Próximo entregable</small>
+          <b>${nextDel ? `${esc(nextDel.id)} · ${esc(nextDel.name)}` : 'Todo entregado ✓'}</b>
+          ${nextDel ? `<span class="hm-pill ${pill(nextDel.date)[1]}">${pill(nextDel.date)[0]}</span>` : ''}
+        </button>
+        <button type="button" class="card" data-h="metas">
+          <small>Metas</small>
+          <b>${st.goals.met} de ${st.goals.total} cumplidas</b>
+          ${nextGoal ? `<span class="hm-pill soon">Próxima: ${esc(fmtDay(nextGoal.date))}</span>` : ''}
+        </button>
+      </div>
+
       ${nextDays.length ? `<div class="hm-sec"><h2>Próximos días</h2><button type="button" class="hm-link" data-range="mes">Calendario</button></div>
-        <ul class="hm-list card">${nextDays.map((d) => { const list = p.activities.filter((a) => a.date === d); const dt = fromYmd(d); return `<li><button type="button" data-hday="${d}"><span class="hm-date"><b>${dt.getDate()}</b><small>${esc(fmtDay(d).split(' ')[0].replace(',', ''))}</small></span><span class="hm-li-t">${esc(list[0].title)}</span><span class="hm-li-r">${list.length} act.</span></button></li>`; }).join('')}</ul>` : ''}`;
+        <ul class="hm-list card">${nextDays.map((d) => { const list = p.activities.filter((a) => a.date === d); const dd = fromYmd(d); return `<li><button type="button" data-hday="${d}"><span class="hm-date"><b>${dd.getDate()}</b><small>${esc(fmtDay(d).split(' ')[0].replace(',', ''))}</small></span><span class="hm-li-t">${esc(list[0].title)}</span><span class="hm-li-r">${list.length} act.</span></button></li>`; }).join('')}</ul>` : ''}`;
   } else if (range === 'semana') {
     const weeks = weeksOf(p);
     const w = weeks.find((x) => today >= planAddDays(x.from, -((fromYmd(x.from).getDay() + 6) % 7)) && today <= planAddDays(x.from, 6 - ((fromYmd(x.from).getDay() + 6) % 7))) || (today < p.start ? weeks[0] : weeks[weeks.length - 1]);
@@ -1938,6 +1986,7 @@ function renderHome() {
   const fronts = st.fronts.filter((f) => f.count);
   const frontsHtml = `
     <div class="hm-sec"><h2>Frentes de trabajo</h2><button type="button" class="hm-link" data-h="resumen">Ver todos</button></div>
+    <p class="hm-hint">Lo que sigue en cada frente</p>
     <div class="hm-fronts">${fronts.map((f) => {
       const nx = p.activities.find((a) => a.front === f.code && a.status !== 'Completada' && a.date >= today) || p.activities.find((a) => a.front === f.code && a.status !== 'Completada');
       return `<button type="button" class="hm-front" style="--c:${esc(f.color)}" data-h="resumen"><small>${esc(f.code)} · ${Math.round(f.weight * 100)} %</small><b>${esc(f.name)}</b><span class="hm-bar thin"><span style="width:${Math.max(2, Math.round(f.real * 100))}%"></span></span><em>${nx ? `${nx.date === today ? 'Hoy' : esc(capFirst(fmtDay(nx.date)))}: ${esc(nx.title)}` : 'Todo listo ✓'}</em></button>`;
@@ -1985,7 +2034,7 @@ function wireHome(view, p) {
     if (k === 'ideas') goIdeas();
     if (k === 'idea') { goIdeas(); setTimeout(() => $('#newText').focus(), 200); }
     if (k === 'import') { state.planSection = 'resumen'; setView('plan'); setTimeout(() => planUI.ensureFileInput().click(), 50); }
-    if (['agenda', 'resumen', 'entregables'].includes(k)) { state.planSection = k; setView('plan'); }
+    if (['agenda', 'resumen', 'entregables', 'metas'].includes(k)) { state.planSection = k; setView('plan'); }
     if (k === 'log') { state.planSection = 'bitacora'; setView('plan'); }
     if (k === 'report') { state.planSection = 'reporte'; setView('plan'); }
     if (k === 'ask') {
