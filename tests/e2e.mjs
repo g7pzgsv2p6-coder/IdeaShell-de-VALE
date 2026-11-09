@@ -112,6 +112,8 @@ await context.route('https://generativelanguage.googleapis.com/**', async (route
     text = 'Revisamos el manejo de residuos con el proveedor. Hay que pedir cotización directa y digitalizar la documentación antes de la fiscalización del jueves.';
   } else if (allText.includes('Esta es la idea o nota')) {
     text = 'Según la nota, sus tareas son:\n- Pedir **cotización directa** al proveedor\n- Digitalizar la documentación';
+  } else if (allText.includes('resumen de la semana')) {
+    text = '## Lo principal\n- Reunión de proveedores\n## Decisiones y avances\n- Pedir cotización directa\n## Pendientes\n- Digitalizar documentación\n## Sugerencia para la próxima semana\n- Cerrar la cotización';
   } else if (allText.includes('Estas son las ideas guardadas')) {
     text = 'Sus pendientes principales:\n- "Proveedores de residuos y fiscalización": pedir cotización\n- "Presentación del trimestre": preparar gráficos';
   } else {
@@ -410,6 +412,9 @@ try {
   await shot('11-preguntar-ideas.png');
   await page.click('.sheet.askall [data-close]');
   await page.waitForTimeout(300);
+  await page.click('#digestBtn');
+  await page.waitForSelector('.digest h4');
+  check('IA: Resumen de mi semana', (await page.locator('.digest h4').count()) === 4);
   await page.click('#organizeBtn');
   await page.waitForSelector('.group');
   check('IA: Organizar mis ideas (agrupa)', (await page.locator('.group').count()) === 2);
@@ -457,6 +462,85 @@ try {
   await go('all');
   check('Importar respaldo (combinar)', (await page.locator('.idea-card', { hasText: 'Idea importada' }).count()) === 1);
 
+  // ---------- inteligencia sin IA y orden ----------
+  await page.fill('#newText', 'Hay que llamar a Carla mañana a las 10 por el informe de costos, y tengo que revisar el presupuesto del proveedor');
+  await page.selectOption('#newCategory', '');
+  await page.click('#saveNewBtn');
+  await page.waitForTimeout(400);
+  const smartToast = await page.innerText('#toast');
+  check('Guardado inteligente: categoría sugerida (Trabajo)', smartToast.includes('en Trabajo'), smartToast.replace(/\n/g, ' '));
+  check('Guardado inteligente: detecta "mañana a las 10" y ofrece recordatorio', smartToast.includes('mañana a las 10'));
+  await page.click('#toast button');
+  await page.waitForTimeout(400);
+  const carla = (await idb('ideas')).find((i) => i.text.includes('Carla'));
+  const tomorrow10 = new Date(); tomorrow10.setDate(tomorrow10.getDate() + 1); tomorrow10.setHours(10, 0, 0, 0);
+  check('Recordatorio creado con un toque', carla.remindAt === tomorrow10.getTime());
+  check('Título automático sin "Hay que"', carla.title.startsWith('Llamar a Carla'), carla.title);
+  await page.fill('#newText', 'Llamar a Carla por el informe de costos y revisar el presupuesto del proveedor');
+  await page.click('#saveNewBtn');
+  await page.waitForSelector('.sheet.dialog');
+  check('Detecta idea parecida al guardar', (await page.innerText('.sheet.dialog')).includes('Se parece'));
+  await page.waitForTimeout(250);
+  await page.click('.sheet.dialog .btn.primary');
+  await page.waitForTimeout(500);
+  const carla2 = (await idb('ideas')).find((i) => i.id === carla.id);
+  check('Agregar a la idea parecida (sin duplicar)', carla2.text.includes('revisar el presupuesto del proveedor\n\nLlamar a Carla'));
+  await page.evaluate(() => window.scrollTo(0, 0));
+  check('Panel "Hoy" en el inicio (con el próximo recordatorio)', await page.isVisible('#todayPanel') && /próximo|recordatorio/i.test(await page.innerText('#todayPanel')));
+  await shot('15-hoy.png');
+  await page.locator('.idea-card', { hasText: 'Carla' }).locator('.card-open').click();
+  await page.waitForSelector('.sheet.editor');
+  await page.waitForTimeout(400);
+  check('Sugerencias: tareas detectadas en el texto', await page.locator('.smart-chip[data-smart="tasks"]').count() === 1);
+  await shot('16-sugerencias.png');
+  await page.click('.smart-chip[data-smart="tasks"]');
+  await page.waitForTimeout(300);
+  check('Agregar tareas detectadas con un toque', (await page.locator('.sheet.editor .steps li').count()) === 2);
+  await closeEditor();
+
+  await page.click('.home-tabs [data-tab="tasks"]');
+  await page.waitForTimeout(400);
+  const groups = await page.locator('.task-group').count();
+  check('Vista Tareas: pendientes agrupadas por idea', groups >= 2, `${groups} grupos`);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await shot('17-tareas.png');
+  await page.locator('.task-group', { hasText: 'Carla' }).locator('input[type="checkbox"]').first().check();
+  await page.waitForTimeout(600);
+  check('Marcar tarea como hecha desde Tareas', (await idb('ideas')).find((i) => i.id === carla.id).steps.filter((x) => x.done).length === 1);
+
+  await page.click('.home-tabs [data-tab="board"]');
+  await page.waitForTimeout(400);
+  check('Vista Tablero con 3 columnas', (await page.locator('.board-col').count()) === 3);
+  await page.locator('.col-nueva .board-card', { hasText: 'Carla' }).locator('[data-dir="1"]').click();
+  await page.waitForTimeout(400);
+  check('Mover idea en el Tablero', (await idb('ideas')).find((i) => i.id === carla.id).status === 'desarrollo');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await shot('18-tablero.png');
+
+  await page.click('.home-tabs [data-tab="ideas"]');
+  await page.waitForTimeout(300);
+  await page.click('#tplBtn');
+  await page.waitForSelector('.tpl-grid');
+  await page.waitForTimeout(300);
+  await shot('19-plantillas.png');
+  await page.click('[data-tpl="reunion"]');
+  await page.waitForSelector('.sheet.editor');
+  await page.waitForTimeout(400);
+  const tpl = { title: await page.inputValue('#edTitle'), text: await page.inputValue('#edText'), steps: await page.locator('.sheet.editor .steps li').count() };
+  check('Plantilla de Reunión', tpl.title === 'Reunión' && tpl.text.includes('Acuerdos:') && tpl.steps === 1, JSON.stringify(tpl));
+  await page.click('.sheet.editor [data-act="merge"]');
+  await page.waitForSelector('[data-pick]');
+  await page.waitForTimeout(300);
+  await page.locator('[data-pick]').filter({ hasText: 'Llamar a Carla' }).click();
+  await page.waitForSelector('.sheet.dialog');
+  await page.waitForTimeout(250);
+  await page.click('.sheet.dialog .btn.primary');
+  await page.waitForTimeout(800);
+  const merged = (await idb('ideas')).find((i) => i.id === carla.id);
+  check('Combinar dos ideas (contenido y pasos juntos)', merged.text.includes('Acuerdos:') && merged.steps.length === 3, `${merged.steps.length} pasos`);
+  if (await page.locator('.sheet.editor').count()) await closeEditor();
+  await go('all');
+
   // Borrar claves
   await go('settings');
   await page.click('#delAllKeys');
@@ -473,7 +557,7 @@ try {
   // ---------- modo oscuro ----------
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.waitForTimeout(300);
-  check('Modo oscuro automático', (await page.evaluate(() => getComputedStyle(document.body).backgroundColor)) === 'rgb(20, 17, 31)');
+  check('Modo oscuro automático', (await page.evaluate(() => getComputedStyle(document.body).backgroundColor)) === 'rgb(27, 20, 36)');
   await page.evaluate(() => window.scrollTo(0, 0));
   await shot('12-modo-oscuro.png');
   await page.locator('.idea-card.has-audio .card-open').click();
@@ -488,7 +572,7 @@ try {
   await page.reload();
   await ready();
   const offlineCards = await page.locator('.idea-card').count();
-  check('Abre sin conexión con las ideas guardadas', offlineCards === 6 && await page.isVisible('#offlinePill'), `${offlineCards} ideas`);
+  check('Abre sin conexión con las ideas guardadas', offlineCards === 7 && await page.isVisible('#offlinePill'), `${offlineCards} ideas`);
   await page.locator('.idea-card.has-audio .card-open').click();
   await page.waitForSelector('.player');
   check('El audio se escucha sin conexión', await page.locator('.player .play-btn').count() === 1);
@@ -497,7 +581,7 @@ try {
   const cold = await context.newPage();
   await cold.goto(BASE);
   await cold.waitForFunction(() => document.documentElement.classList.contains('ready'));
-  check('Pestaña nueva sin conexión también abre', (await cold.locator('.idea-card').count()) === 6);
+  check('Pestaña nueva sin conexión también abre', (await cold.locator('.idea-card').count()) === 7);
   await cold.close();
   await context.setOffline(false);
 

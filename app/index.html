@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>IdeaShel Vale · Ideas por voz</title>
   <meta name="description" content="Capture sus ideas por voz y organícelas. Funciona sin internet y todo queda guardado en su teléfono.">
-  <meta name="theme-color" content="#F6F4FF" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#14111F" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#FFF6FB" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1B1424" media="(prefers-color-scheme: dark)">
   <meta name="color-scheme" content="light dark">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
@@ -40,13 +40,21 @@
     <div id="banner" class="banner" hidden></div>
 
     <main>
+      <!-- Encabezado compartido por Ideas, Tareas y Tablero -->
+      <div class="home-head" id="homeHead">
+        <h1 id="greeting" class="greeting">Hola</h1>
+        <p id="homeSub" class="home-sub"></p>
+        <div class="home-tabs" role="tablist" aria-label="Vistas">
+          <button type="button" role="tab" data-tab="ideas" aria-selected="true">Ideas</button>
+          <button type="button" role="tab" data-tab="tasks" aria-selected="false">Tareas</button>
+          <button type="button" role="tab" data-tab="board" aria-selected="false">Tablero</button>
+        </div>
+      </div>
+
       <!-- IDEAS -->
       <section id="view-ideas" class="view active" aria-label="Ideas">
-        <div class="home-head">
-          <h1 id="greeting" class="greeting">Hola</h1>
-          <p id="homeSub" class="home-sub"></p>
-        </div>
         <p id="voiceUnavailable" class="notice" hidden></p>
+        <div id="todayPanel" class="today" hidden></div>
 
         <div class="searchbar">
           <div class="search-wrap">
@@ -65,6 +73,12 @@
         <div id="emptyState" class="empty" hidden></div>
       </section>
 
+      <!-- TAREAS -->
+      <section id="view-tasks" class="view" aria-label="Tareas"></section>
+
+      <!-- TABLERO -->
+      <section id="view-board" class="view" aria-label="Tablero"></section>
+
       <!-- EXPLORAR -->
       <section id="view-explore" class="view" aria-label="Explorar"></section>
 
@@ -80,6 +94,9 @@
         <button id="saveNewBtn" class="btn primary small" type="button">Guardar idea</button>
       </div>
       <div class="composer-row">
+        <button id="tplBtn" class="tpl-btn" type="button" aria-label="Crear desde una plantilla">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+        </button>
         <label class="sr-only" for="newText">Nueva idea</label>
         <textarea id="newText" rows="1" placeholder="Escriba o dicte su idea…"></textarea>
         <button id="recBtn" class="rec-btn" type="button" aria-label="Grabar idea por voz">

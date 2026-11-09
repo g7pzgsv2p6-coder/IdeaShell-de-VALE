@@ -2,22 +2,25 @@
 import { db, loadSettings, saveSetting } from './db.js';
 import * as AI from './ai.js';
 import { Dictation, voiceSupported, voiceErrorMessage, VOICE_LANGS } from './voice.js';
+import { parseDateES, extractTasks, relatedIdeas, findDuplicate, suggestCategory } from './smart.js';
 import { AudioRecorder, audioSupported, micErrorMessage, fmtDuration, toWavChunks, blobToBase64, base64ToBlob } from './recorder.js';
 import {
   $, $$, esc, uid, debounce, normalize, normTag, extractHashtags, autoTitle,
   fmtFull, fmtShortDate, fmtRelative, daysBetween, stamp
 } from './util.js';
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 const TRASH_DAYS = 30;
 
 const DEFAULT_CATEGORIES = [
-  { id: 'trabajo', name: 'Trabajo', color: '#5B3FD9', order: 0 },
-  { id: 'personal', name: 'Personal', color: '#FF7A59', order: 1 },
-  { id: 'proyectos', name: 'Proyectos', color: '#1F9D6B', order: 2 },
-  { id: 'estudios', name: 'Estudios', color: '#2F80ED', order: 3 }
+  { id: 'trabajo', name: 'Trabajo', color: '#A78BFA', order: 0 },
+  { id: 'personal', name: 'Personal', color: '#F472B6', order: 1 },
+  { id: 'proyectos', name: 'Proyectos', color: '#34D399', order: 2 },
+  { id: 'estudios', name: 'Estudios', color: '#60A5FA', order: 3 }
 ];
-const CAT_COLORS = ['#5B3FD9', '#FF7A59', '#1F9D6B', '#2F80ED', '#E0A100', '#D93F7A', '#0FA3B1', '#8A5A44'];
+// Colores pastel para las categorías (con suficiente contraste para los puntos de color)
+const CAT_COLORS = ['#A78BFA', '#F472B6', '#34D399', '#60A5FA', '#FBBF24', '#FB7185', '#2DD4BF', '#C084FC'];
+const OLD_CAT_COLORS = ['#5B3FD9', '#FF7A59', '#1F9D6B', '#2F80ED', '#E0A100', '#D93F7A', '#0FA3B1', '#8A5A44'];
 const STATUS = { nueva: 'Nueva', desarrollo: 'En desarrollo', hecha: 'Hecha' };
 const SORTS = {
   new: 'Más recientes primero',
@@ -179,6 +182,17 @@ async function loadData() {
     }
     await setSetting('initialized', true);
     await setSetting('firstRunAt', Date.now());
+    await setSetting('paletteV2', true);
+  }
+  if (!state.settings.paletteV2) {
+    // v1.2: los colores de la paleta anterior pasan a sus equivalentes pastel
+    const changed = [];
+    for (const c of state.categories) {
+      const i = OLD_CAT_COLORS.indexOf(String(c.color).toUpperCase());
+      if (i !== -1) { c.color = CAT_COLORS[i]; changed.push(c); }
+    }
+    if (changed.length) await db.bulkPut('categories', changed);
+    await setSetting('paletteV2', true);
   }
 }
 
@@ -318,8 +332,8 @@ function applyTheme() {
   const root = document.documentElement;
   if (t === 'light' || t === 'dark') root.dataset.theme = t; else delete root.dataset.theme;
   const metas = $$('meta[name="theme-color"]');
-  const light = '#F6F4FF';
-  const dark = '#14111F';
+  const light = '#FFF6FB';
+  const dark = '#1B1424';
   if (metas[0]) metas[0].content = t === 'dark' ? dark : light;
   if (metas[1]) metas[1].content = t === 'light' ? light : dark;
 }
@@ -330,10 +344,21 @@ function setView(view) {
   state.view = view;
   document.body.dataset.view = view;
   $$('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${view}`));
+  document.querySelectorAll('.home-tabs [data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === view)));
   if (view === 'ideas') renderIdeas();
+  if (view === 'tasks') renderTasks();
+  if (view === 'board') renderBoard();
   if (view === 'explore') renderExplore();
   if (view === 'settings') renderSettings();
   window.scrollTo({ top: 0 });
+}
+
+/** Re-dibuja la vista abierta (después de cambios hechos desde una hoja o el menú). */
+function refreshView() {
+  if (state.view === 'ideas') renderIdeas();
+  if (state.view === 'tasks') renderTasks();
+  if (state.view === 'board') renderBoard();
+  if (state.view === 'explore') renderExplore();
 }
 
 function goIdeas(patch = {}) {
@@ -375,6 +400,8 @@ function openDrawer() {
         ${item('data-go="fav"', '★', 'Favoritas', count((i) => i.favorite), state.view === 'ideas' && f.fav)}
         ${item('data-go="audio"', '🎙', 'Grabaciones', count((i) => i.audio), state.view === 'ideas' && f.audio)}
         ${item('data-go="scheduled"', '⏰', 'Programadas', count((i) => i.remindAt), state.view === 'ideas' && f.scheduled)}
+        ${item('data-go="tasks"', '☑', 'Tareas', pendingTasks().length, state.view === 'tasks')}
+        ${item('data-go="board"', '▦', 'Tablero', undefined, state.view === 'board')}
         ${item('data-go="explore"', '✦', 'Explorar', undefined, state.view === 'explore')}
       </nav>
       <h3 class="drawer-title">Categorías</h3>
@@ -419,6 +446,8 @@ function openDrawer() {
       case 'trash': setTimeout(openTrash, 220); break;
       case 'edittags': setTimeout(openTagManager, 220); break;
       case 'explore': setView('explore'); break;
+      case 'tasks': setView('tasks'); break;
+      case 'board': setView('board'); break;
       case 'settings': setView('settings'); break;
       case 'personalize':
         setView('settings');
@@ -452,6 +481,10 @@ function setupCapture() {
   $('#saveNewBtn').addEventListener('mousedown', (e) => e.preventDefault());
   $('#saveNewBtn').addEventListener('click', saveNew);
   recBtn.addEventListener('click', openRecorder);
+  $('#tplBtn').addEventListener('click', openTemplates);
+  document.querySelectorAll('.home-tabs [data-tab]').forEach((b) => b.addEventListener('click', () => {
+    if (b.dataset.tab === 'ideas') goIdeas(); else setView(b.dataset.tab);
+  }));
   $('#newCategory').addEventListener('change', (e) => { state.lastCategory = e.target.value; });
 }
 
@@ -468,6 +501,33 @@ function defaultNewCategory({ recording = false } = {}) {
   return sel ? sel.value || null : null;
 }
 
+/** "mañana a las 09:00", "hoy a las 15:30" o "el viernes 13 nov a las 09:00". */
+function fmtWhen(ts) {
+  const d = new Date(ts);
+  const now = new Date();
+  const t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const day = Math.floor((ts - t0) / 86400000);
+  const hm = d.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+  if (day === 0) return `hoy a las ${hm}`;
+  if (day === 1) return `mañana a las ${hm}`;
+  return `el ${d.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'short' })} a las ${hm}`;
+}
+
+function clearComposer() {
+  const textEl = $('#newText');
+  textEl.value = '';
+  autoGrow(textEl, 140);
+  textEl.blur();
+  $('#composer').classList.remove('expanded');
+}
+
+async function appendToIdea(target, text, from = '') {
+  target.text = `${(target.text || '').trim()}\n\n${from}${text}`.trim();
+  target.tags = [...new Set([...(target.tags || []), ...extractHashtags(text)])];
+  refreshAutoTitle(target);
+  return persistIdea(target);
+}
+
 async function saveNew() {
   const textEl = $('#newText');
   const text = textEl.value.trim();
@@ -476,15 +536,56 @@ async function saveNew() {
     textEl.focus();
     return;
   }
-  const idea = newIdea(text, defaultNewCategory());
+  // Inteligente: ¿ya existe una idea muy parecida?
+  const dup = findDuplicate(text, activeIdeas());
+  if (dup) {
+    const choice = await dialog({
+      title: 'Se parece a una idea que ya tiene',
+      message: `“${dup.idea.title}” (${fmtRelative(dup.idea.createdAt)}). ¿Qué desea hacer?`,
+      buttons: [
+        { label: 'Agregar a esa idea', value: 'merge', style: 'primary' },
+        { label: 'Guardar como nueva', value: 'new', style: 'soft' },
+        { label: 'Cancelar', value: null, style: 'ghost' }
+      ]
+    });
+    if (!choice) return;
+    if (choice === 'merge') {
+      if (!(await appendToIdea(dup.idea, text))) return;
+      clearComposer();
+      refreshView();
+      toast(`Agregado a “${dup.idea.title}”`, { action: 'Abrir', onAction: () => openEditor(dup.idea.id) });
+      return;
+    }
+  }
+  // Inteligente: categoría sugerida si no eligió una
+  let category = defaultNewCategory();
+  let autoCat = null;
+  if (!category) {
+    const sug = suggestCategory(text, activeIdeas(), sortedCats());
+    if (sug && sug.confidence >= 0.55) { category = sug.id; autoCat = catById(sug.id); }
+  }
+  const idea = newIdea(text, category);
   const ok = await persistIdea(idea, { touch: false });
   if (!ok) return;
-  textEl.value = '';
-  autoGrow(textEl, 140);
-  textEl.blur();
-  $('#composer').classList.remove('expanded');
-  renderIdeas();
-  toast('Idea guardada ✨', { action: 'Abrir', onAction: () => openEditor(idea.id) });
+  clearComposer();
+  refreshView();
+  const saved = `Idea guardada${autoCat ? ` en ${autoCat.name}` : ''} ✨`;
+  // Inteligente: ¿menciona una fecha? Se ofrece el recordatorio
+  const when = parseDateES(text);
+  if (when) {
+    toast(`${saved} ¿Le recuerdo ${fmtWhen(when.ts)}?`, {
+      action: 'Recordar',
+      duration: 8000,
+      onAction: async () => {
+        idea.remindAt = when.ts;
+        await persistIdea(idea);
+        refreshView();
+        toast(`Listo: le recordaré ${fmtWhen(when.ts)}. En la idea puede agregarlo al Calendario.`);
+      }
+    });
+  } else {
+    toast(saved, { action: 'Abrir', onAction: () => openEditor(idea.id) });
+  }
 }
 
 // ---------------------------------------------------------------- grabadora
@@ -882,6 +983,7 @@ function renderIdeas() {
   const list = filteredIdeas();
   const f = state.filters;
   const grid = state.settings.viewMode !== 'list';
+  renderToday();
   const ft = filterTitle();
   $('#greeting').textContent = ft || greetingText();
   const all = activeIdeas().filter((i) => !i.archived);
@@ -990,7 +1092,7 @@ function toLocalInput(ts) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-function openEditor(id) {
+function openEditor(id, { focusText = false } = {}) {
   const idea = state.ideas.find((i) => i.id === id);
   if (!idea) return;
   idea.chat = idea.chat || [];
@@ -1005,8 +1107,7 @@ function openEditor(id) {
       document.removeEventListener('idea-change', onChange);
       if (cleanupPlayer) cleanupPlayer();
       if (edDict.active) edDict.stop();
-      renderIdeas();
-      if (state.view === 'explore') renderExplore();
+      refreshView();
     },
     html: `
       <div class="sheet-head">
@@ -1029,6 +1130,7 @@ function openEditor(id) {
         </label>
         <p class="meta">Creada ${esc(fmtFull(idea.createdAt))}${idea.updatedAt && idea.updatedAt - idea.createdAt > 60000 ? ` · editada ${esc(fmtRelative(idea.updatedAt))}` : ''}</p>
 
+        <div id="smartBox" class="smart-box" hidden></div>
         <div id="procBox"></div>
         ${idea.audio ? '<div id="playerBox" class="block player-block"></div>' : ''}
         <div id="primaryAI"></div>
@@ -1061,6 +1163,7 @@ function openEditor(id) {
 
         <section class="block" id="summaryBlock"></section>
         <section class="block" id="stepsBlock"></section>
+        <section class="block related-block" id="relatedBlock" hidden></section>
 
         ${ai ? `
         <section class="block ai-block">
@@ -1081,7 +1184,8 @@ function openEditor(id) {
 
         <div class="editor-footer">
           <button type="button" class="btn ghost" data-act="copy">Copiar texto</button>
-          <button type="button" class="btn danger-ghost" data-act="delete">Mover a la papelera</button>
+          <button type="button" class="btn ghost" data-act="merge">Combinar con…</button>
+          <button type="button" class="btn danger-ghost wide" data-act="delete">Mover a la papelera</button>
         </div>
       </div>`
   });
@@ -1276,8 +1380,46 @@ function openEditor(id) {
     renderTags();
     renderSummary();
     renderSteps();
+    renderSmart();
+    renderRelated();
   }
+
+  // Sugerencias inteligentes (sin internet): fecha, categoría y tareas detectadas
+  const dismissed = new Set();
+  function renderSmart() {
+    const box = el.querySelector('#smartBox');
+    const chips = [];
+    const text = `${idea.title}\n${idea.text || ''}`;
+    if (!idea.remindAt && !dismissed.has('date')) {
+      const when = parseDateES(text, new Date());
+      if (when) chips.push(`<button type="button" class="smart-chip" data-smart="date" data-ts="${when.ts}">⏰ Recordarme ${esc(fmtWhen(when.ts))}</button>`);
+    }
+    if (!idea.category && !dismissed.has('cat')) {
+      const sug = suggestCategory(text, activeIdeas().filter((i) => i.id !== idea.id), sortedCats());
+      if (sug && sug.confidence >= 0.4) chips.push(`<button type="button" class="smart-chip" data-smart="cat" data-id="${esc(sug.id)}">📁 Guardar en ${esc(catById(sug.id).name)}</button>`);
+    }
+    if (!dismissed.has('tasks')) {
+      const have = new Set((idea.steps || []).map((x) => normalize(x.text)));
+      const found = extractTasks(idea.text).filter((t) => !have.has(normalize(t)));
+      if (found.length) chips.push(`<button type="button" class="smart-chip" data-smart="tasks" data-tasks="${esc(JSON.stringify(found))}">☑ Agregar ${found.length} ${found.length === 1 ? 'tarea detectada' : 'tareas detectadas'}</button>`);
+    }
+    box.hidden = !chips.length;
+    box.innerHTML = chips.length ? `<span class="smart-label">💡 Sugerencias</span><div class="smart-chips">${chips.join('')}</div>` : '';
+  }
+
+  function renderRelated() {
+    const box = el.querySelector('#relatedBlock');
+    const rel = relatedIdeas(idea, activeIdeas().filter((i) => !i.archived), { limit: 3, min: 0.15 });
+    box.hidden = !rel.length;
+    box.innerHTML = rel.length ? `<h3 class="block-title">🔗 Ideas relacionadas</h3>
+      <ul class="pick-list">${rel.map((r) => `<li class="rel-item"><button type="button" data-openrel="${esc(r.idea.id)}">${esc(r.idea.title)}<small>${esc(fmtRelative(r.idea.createdAt))} · ${Math.round(r.score * 100)}% parecida</small></button>
+        <button type="button" class="btn soft small" data-mergerel="${esc(r.idea.id)}">Combinar</button></li>`).join('')}</ul>` : '';
+  }
+  const smartLater = debounce(() => { renderSmart(); renderRelated(); }, 700);
+  textEl.addEventListener('input', smartLater);
+  titleEl.addEventListener('input', smartLater);
   refreshAll();
+  if (focusText) setTimeout(() => { textEl.focus(); textEl.setSelectionRange(0, 0); }, 260);
 
   // Reproductor
   if (idea.audio) {
@@ -1347,6 +1489,43 @@ function openEditor(id) {
       save();
       return;
     }
+    const smart = e.target.closest('[data-smart]');
+    if (smart) {
+      const k = smart.dataset.smart;
+      if (k === 'date') {
+        idea.remindAt = Number(smart.dataset.ts);
+        el.querySelector('#edRemind').value = toLocalInput(idea.remindAt);
+        el.querySelector('#calBtn').hidden = false;
+        toast(`Le recordaré ${fmtWhen(idea.remindAt)}.`);
+      }
+      if (k === 'cat') {
+        idea.category = smart.dataset.id;
+        el.querySelector('#edCat').value = idea.category;
+      }
+      if (k === 'tasks') {
+        const found = JSON.parse(smart.dataset.tasks);
+        idea.steps = [...(idea.steps || []), ...found.map((t) => ({ text: t, done: false }))];
+        renderSteps();
+        toast(`${found.length} ${found.length === 1 ? 'tarea agregada' : 'tareas agregadas'}.`);
+      }
+      dismissed.add(k);
+      renderSmart();
+      save();
+      return;
+    }
+    const openRel = e.target.closest('[data-openrel]');
+    if (openRel) { s.close(); setTimeout(() => openEditor(openRel.dataset.openrel), 220); return; }
+    const mergeRel = e.target.closest('[data-mergerel]');
+    if (mergeRel) {
+      const other = state.ideas.find((i) => i.id === mergeRel.dataset.mergerel);
+      if (!(await confirmDialog('¿Combinar las ideas?', `“${other.title}” se juntará dentro de esta idea.`, 'Combinar'))) return;
+      save.flush();
+      const kept = await mergeIdeas(idea, other);
+      refreshAll();
+      if (idea.audio && !el.querySelector('#playerBox')) toast('Se agregó el audio de la otra idea. Vuelva a abrir para escucharlo.');
+      toast(kept ? 'Combinadas. La otra quedó archivada para conservar su audio.' : 'Ideas combinadas.');
+      return;
+    }
     const aiBtn = e.target.closest('[data-ai]');
     if (aiBtn) { runIdeaAI(aiBtn.dataset.ai, idea, el, { save, renderSummary, renderSteps, renderTags, titleEl, textEl }); return; }
     if (!act) return;
@@ -1373,6 +1552,10 @@ function openEditor(id) {
         break;
       case 'copy':
         copyText(ideaAsText(idea));
+        break;
+      case 'merge':
+        save.flush();
+        openMergePicker(idea, (target) => { s.close(); setTimeout(() => openEditor(target.id), 240); });
         break;
       case 'gosettings':
         s.close();
@@ -1524,6 +1707,281 @@ async function shareIdea(idea) {
   }
 }
 
+// ---------------------------------------------------------------- panel "Hoy"
+
+function pendingTasks() {
+  const out = [];
+  for (const i of activeIdeas()) {
+    if (i.archived) continue;
+    (i.steps || []).forEach((st, idx) => { if (!st.done) out.push({ idea: i, idx, step: st }); });
+  }
+  return out;
+}
+
+function endOfToday() {
+  const d = new Date();
+  d.setHours(23, 59, 59, 999);
+  return d.getTime();
+}
+
+/** Resumen del día: recordatorios, tareas, grabaciones por organizar e idea para retomar. */
+function renderToday() {
+  const box = $('#todayPanel');
+  const f = state.filters;
+  const filtered = f.q || f.category !== 'all' || f.fav || f.tag || f.status || f.archived || f.audio || f.scheduled;
+  const ideas = activeIdeas().filter((i) => !i.archived);
+  if (filtered || ideas.length < 2) { box.hidden = true; return; }
+  const due = ideas.filter((i) => i.remindAt && i.remindAt <= endOfToday() && i.status !== 'hecha');
+  const tasks = pendingTasks();
+  const cfg = aiConfig();
+  const unorganized = cfg ? ideas.filter((i) => i.audio && !i.note && !state.processing.has(i.id)) : [];
+  const weekAgo = Date.now() - 7 * 86400000;
+  const stale = ideas.filter((i) => i.status !== 'hecha' && (i.updatedAt || i.createdAt) < weekAgo)
+    .sort((a, b) => Number(b.favorite) - Number(a.favorite) || (a.updatedAt || a.createdAt) - (b.updatedAt || b.createdAt))[0];
+  const cards = [];
+  const next = ideas.filter((i) => i.remindAt && i.remindAt > endOfToday() && i.status !== 'hecha').sort((a, b) => a.remindAt - b.remindAt)[0];
+  if (due.length || !next) {
+    cards.push(`<button type="button" class="today-card ${due.length ? 'hot' : ''}" data-today="due"><span class="tc-icon">⏰</span><b>${due.length}</b><span>${due.length === 1 ? 'recordatorio hoy' : 'recordatorios hoy'}</span></button>`);
+  } else {
+    cards.push(`<button type="button" class="today-card wide" data-today="next" data-id="${esc(next.id)}"><span class="tc-icon">⏰</span><span class="tc-label">Próximo · ${esc(fmtWhen(next.remindAt))}</span><span class="tc-title">${esc(next.title)}</span></button>`);
+  }
+  cards.push(`<button type="button" class="today-card" data-today="tasks"><span class="tc-icon">☑</span><b>${tasks.length}</b><span>${tasks.length === 1 ? 'tarea pendiente' : 'tareas pendientes'}</span></button>`);
+  if (unorganized.length) cards.push(`<button type="button" class="today-card" data-today="organize"><span class="tc-icon">✨</span><b>${unorganized.length}</b><span>${unorganized.length === 1 ? 'grabación por organizar' : 'grabaciones por organizar'}</span></button>`);
+  if (stale) cards.push(`<button type="button" class="today-card wide" data-today="stale" data-id="${esc(stale.id)}"><span class="tc-icon">🔁</span><span class="tc-label">Retomar</span><span class="tc-title">${esc(stale.title)}</span></button>`);
+  box.hidden = false;
+  box.innerHTML = `<h2 class="today-title">Hoy</h2><div class="today-row">${cards.join('')}</div>`;
+  box.onclick = (e) => {
+    const b = e.target.closest('[data-today]');
+    if (!b) return;
+    const k = b.dataset.today;
+    if (k === 'due') goIdeas({ scheduled: true });
+    if (k === 'tasks') setView('tasks');
+    if (k === 'stale' || k === 'next') openEditor(b.dataset.id);
+    if (k === 'organize') {
+      unorganized.forEach((i) => processIdea(i.id, { transcribe: AI.canHearAudio(cfg) }));
+      toast(`Organizando ${unorganized.length} ${unorganized.length === 1 ? 'grabación' : 'grabaciones'}…`);
+    }
+  };
+}
+
+// ---------------------------------------------------------------- vista Tareas
+
+function setHead(title, sub) {
+  $('#greeting').textContent = title;
+  $('#homeSub').textContent = sub;
+}
+
+function renderTasks() {
+  const view = $('#view-tasks');
+  const mode = state.tasksMode || 'pending';
+  const ideas = activeIdeas().filter((i) => !i.archived && (i.steps || []).length);
+  const all = [];
+  ideas.forEach((i) => i.steps.forEach((st, idx) => all.push({ idea: i, idx, step: st })));
+  const pending = all.filter((t) => !t.step.done);
+  setHead(greetingText(), pending.length ? `${pending.length} ${pending.length === 1 ? 'tarea pendiente' : 'tareas pendientes'}` : 'Sin tareas pendientes');
+  const shown = mode === 'pending' ? pending : mode === 'done' ? all.filter((t) => t.step.done) : all;
+  // Agrupadas por idea: primero las que tienen recordatorio más cercano
+  const groups = new Map();
+  shown.forEach((t) => { if (!groups.has(t.idea.id)) groups.set(t.idea.id, { idea: t.idea, items: [] }); groups.get(t.idea.id).items.push(t); });
+  const ordered = [...groups.values()].sort((a, b) => (a.idea.remindAt || Infinity) - (b.idea.remindAt || Infinity) || b.idea.createdAt - a.idea.createdAt);
+  const total = all.length;
+  const doneN = total - pending.length;
+  view.innerHTML = `
+    ${total ? `<div class="task-progress"><div class="progress big"><span style="width:${Math.round((doneN / total) * 100)}%"></span></div><span>${doneN} de ${total} hechas</span></div>` : ''}
+    <div class="segmented small-seg" role="radiogroup" aria-label="Mostrar">
+      ${[['pending', 'Pendientes'], ['done', 'Hechas'], ['all', 'Todas']].map(([v, l]) => `<button type="button" role="radio" aria-checked="${mode === v}" class="${mode === v ? 'on' : ''}" data-tmode="${v}">${l}</button>`).join('')}
+    </div>
+    ${ordered.length ? ordered.map((g) => {
+      const cat = catById(g.idea.category);
+      return `
+      <section class="task-group" style="--c:${esc(cat ? cat.color : '#C9B8E0')}">
+        <button type="button" class="task-head" data-openidea="${esc(g.idea.id)}">
+          <span class="cat-dot"></span><span class="tg-title">${esc(g.idea.title)}</span>
+          ${g.idea.remindAt ? reminderLabel(g.idea.remindAt) : ''}<span class="chev" aria-hidden="true">›</span>
+        </button>
+        <ul class="steps">
+          ${g.items.map((t) => `<li class="${t.step.done ? 'done' : ''}"><label><input type="checkbox" data-tid="${esc(g.idea.id)}" data-tidx="${t.idx}" ${t.step.done ? 'checked' : ''}><span>${esc(t.step.text)}</span></label></li>`).join('')}
+        </ul>
+      </section>`;
+    }).join('') : `<div class="empty"><div class="empty-art" aria-hidden="true">☑</div><h3>${mode === 'done' ? 'Aún no hay tareas hechas' : 'No hay tareas pendientes'}</h3>
+      <p>Las tareas salen de los pasos de cada idea. La app también las detecta solas cuando escribe “hay que…” o “tengo que…”, y la IA las crea al organizar una grabación.</p></div>`}
+    ${pending.length ? '<button type="button" class="btn soft full-w" id="shareTasks">Compartir pendientes (Notas, WhatsApp…)</button>' : ''}`;
+  view.querySelectorAll('[data-tmode]').forEach((b) => { b.onclick = () => { state.tasksMode = b.dataset.tmode; renderTasks(); }; });
+  view.querySelectorAll('[data-openidea]').forEach((b) => { b.onclick = () => openEditor(b.dataset.openidea); });
+  view.querySelectorAll('[data-tid]').forEach((cb) => {
+    cb.onchange = async () => {
+      const idea = state.ideas.find((i) => i.id === cb.dataset.tid);
+      idea.steps[Number(cb.dataset.tidx)].done = cb.checked;
+      if (idea.steps.every((x) => x.done) && idea.status !== 'hecha') {
+        idea.status = 'hecha';
+        toast(`¡“${idea.title}” quedó completa! 🎉`);
+      }
+      await persistIdea(idea);
+      setTimeout(renderTasks, cb.checked && mode === 'pending' ? 350 : 0);
+    };
+  });
+  view.querySelector('#shareTasks')?.addEventListener('click', () => {
+    const lines = ['Pendientes', ''];
+    const byIdea = new Map();
+    pending.forEach((t) => { if (!byIdea.has(t.idea.id)) byIdea.set(t.idea.id, [t.idea.title]); byIdea.get(t.idea.id).push(`☐ ${t.step.text}`); });
+    byIdea.forEach((arr) => { lines.push(arr[0], ...arr.slice(1), ''); });
+    shareText('Pendientes', lines.join('\n').trim());
+  });
+}
+
+// ---------------------------------------------------------------- vista Tablero
+
+const STATUS_ORDER = ['nueva', 'desarrollo', 'hecha'];
+
+function renderBoard() {
+  const view = $('#view-board');
+  const ideas = activeIdeas().filter((i) => !i.archived);
+  const by = (st) => ideas.filter((i) => (i.status || 'nueva') === st).sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || b.updatedAt - a.updatedAt);
+  setHead(greetingText(), `${by('desarrollo').length} en desarrollo · ${by('hecha').length} hechas`);
+  view.innerHTML = `
+    <p class="muted small board-hint">Mueva cada idea con las flechas a medida que avanza.</p>
+    <div class="board" role="list">
+      ${STATUS_ORDER.map((st, si) => `
+        <section class="board-col col-${st}" role="listitem" aria-label="${STATUS[st]}">
+          <h2 class="board-title">${STATUS[st]} <span>${by(st).length}</span></h2>
+          ${by(st).map((i) => {
+            const cat = catById(i.category);
+            const steps = i.steps || [];
+            const done = steps.filter((x) => x.done).length;
+            return `
+            <article class="board-card" style="--c:${esc(cat ? cat.color : '#C9B8E0')}">
+              <button type="button" class="bc-open" data-openidea="${esc(i.id)}">
+                <span class="bc-cat"><span class="cat-dot"></span>${esc(cat ? cat.name : 'Sin categoría')}</span>
+                <strong>${esc(i.title)}</strong>
+                ${steps.length ? `<span class="bc-steps"><span class="progress"><span style="width:${Math.round((done / steps.length) * 100)}%"></span></span>${done}/${steps.length}</span>` : ''}
+              </button>
+              <div class="bc-move">
+                <button type="button" class="icon-btn small" data-move="${esc(i.id)}" data-dir="-1" ${si === 0 ? 'disabled' : ''} aria-label="Mover a ${si > 0 ? STATUS[STATUS_ORDER[si - 1]] : ''}">‹</button>
+                <button type="button" class="icon-btn small" data-move="${esc(i.id)}" data-dir="1" ${si === 2 ? 'disabled' : ''} aria-label="Mover a ${si < 2 ? STATUS[STATUS_ORDER[si + 1]] : ''}">›</button>
+              </div>
+            </article>`;
+          }).join('') || '<p class="muted small board-empty">Sin ideas aquí</p>'}
+        </section>`).join('')}
+    </div>`;
+  view.querySelectorAll('[data-openidea]').forEach((b) => { b.onclick = () => openEditor(b.dataset.openidea); });
+  view.querySelectorAll('[data-move]').forEach((b) => {
+    b.onclick = async () => {
+      const idea = state.ideas.find((i) => i.id === b.dataset.move);
+      const idx = STATUS_ORDER.indexOf(idea.status || 'nueva') + Number(b.dataset.dir);
+      if (idx < 0 || idx > 2) return;
+      idea.status = STATUS_ORDER[idx];
+      await persistIdea(idea);
+      renderBoard();
+      toast(`“${idea.title}” → ${STATUS[idea.status]}`);
+    };
+  });
+}
+
+// ---------------------------------------------------------------- plantillas
+
+const TEMPLATES = [
+  { id: 'reunion', icon: '👥', name: 'Reunión', cat: 'trabajo', title: 'Reunión: ',
+    text: 'Asistentes:\n\nTemas:\n- \n\nAcuerdos:\n- \n\nPróxima reunión:', steps: ['Enviar resumen a los asistentes'] },
+  { id: 'proyecto', icon: '🚀', name: 'Proyecto', cat: 'proyectos', title: 'Proyecto: ',
+    text: 'Objetivo:\n\nPara quién es:\n\nRecursos que necesito:\n\nFecha meta:', steps: ['Definir el objetivo en una frase', 'Hacer una primera versión', 'Mostrarla y pedir opinión'] },
+  { id: 'negocio', icon: '💡', name: 'Idea de negocio', cat: 'proyectos', title: 'Negocio: ',
+    text: 'Problema que resuelve:\n\nSolución:\n\nClientes:\n\nCómo gana dinero:\n\nPrimer experimento:', steps: ['Conversar con 3 posibles clientes'] },
+  { id: 'compras', icon: '🛒', name: 'Lista de compras', cat: 'personal', title: 'Compras',
+    text: 'Lista de compras. Marque cada producto en los pasos.', steps: [] },
+  { id: 'diario', icon: '📔', name: 'Diario del día', cat: 'personal', title: '', text: '¿Qué pasó hoy?\n\nAgradezco:\n\nAprendí:\n\nMañana quiero:', steps: [] },
+  { id: 'estudio', icon: '📚', name: 'Estudio', cat: 'estudios', title: 'Estudiar: ',
+    text: 'Materia:\n\nTemas que entran:\n- \n\nDudas para preguntar:', steps: ['Leer los apuntes', 'Hacer ejercicios', 'Repasar las dudas'] }
+];
+
+function openTemplates() {
+  const s = openSheet({
+    label: 'Plantillas',
+    html: `
+      <div class="sheet-grabber"></div>
+      <h2 class="sheet-title">Nueva idea desde plantilla</h2>
+      <p class="muted">Empiece con una estructura ordenada. Después puede cambiar todo.</p>
+      <div class="tpl-grid">
+        ${TEMPLATES.map((t) => `<button type="button" class="tpl-card" data-tpl="${t.id}"><span class="tpl-icon" aria-hidden="true">${t.icon}</span><span>${esc(t.name)}</span></button>`).join('')}
+      </div>`
+  });
+  s.el.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-tpl]');
+    if (!b) return;
+    const t = TEMPLATES.find((x) => x.id === b.dataset.tpl);
+    const typed = $('#newText').value.trim();
+    const cat = catById(t.cat) ? t.cat : null;
+    const idea = newIdea(typed ? `${typed}\n\n${t.text}` : t.text, defaultNewCategory() || cat);
+    idea.title = t.id === 'diario' ? `Diario · ${fmtShortDate(Date.now())}` : `${t.title}${typed ? autoTitle(typed) : ''}`.trim() || t.name;
+    idea.title = idea.title.replace(/:\s*$/, '');
+    idea.titleAuto = false;
+    idea.steps = t.steps.map((x) => ({ text: x, done: false }));
+    idea.template = t.id;
+    if (!(await persistIdea(idea, { touch: false }))) return;
+    s.close();
+    clearComposer();
+    refreshView();
+    setTimeout(() => openEditor(idea.id, { focusText: true }), 220);
+  });
+}
+
+// ---------------------------------------------------------------- combinar ideas
+
+/** Junta `source` dentro de `target`: texto, nota, etiquetas, pasos y (si se puede) el audio. */
+async function mergeIdeas(target, source) {
+  const header = `— De “${source.title}” (${fmtShortDate(source.createdAt)}):\n`;
+  target.text = `${(target.text || '').trim()}\n\n${header}${source.text || ''}`.trim();
+  if (source.note) target.note = `${(target.note || '').trim()}\n\n## ${source.title}\n${source.note}`.trim();
+  target.tags = [...new Set([...(target.tags || []), ...(source.tags || [])])];
+  target.steps = [...(target.steps || []), ...(source.steps || [])];
+  target.favorite = target.favorite || source.favorite;
+  if (!target.remindAt && source.remindAt) target.remindAt = source.remindAt;
+  if (!target.category && source.category) target.category = source.category;
+  let keepSource = false;
+  if (source.audio) {
+    if (!target.audio) {
+      const blob = await getAudioBlob(source.id);
+      if (blob) {
+        await saveAudio(target.id, blob, source.audio.mime);
+        await deleteAudios([source.id]);
+        target.audio = source.audio;
+        target.transcribed = source.transcribed;
+      }
+    } else {
+      keepSource = true; // dos audios: la original queda archivada para no perder su grabación
+    }
+  }
+  await persistIdea(target);
+  if (keepSource) source.archived = true; else source.deletedAt = Date.now();
+  await persistIdea(source, { touch: false });
+  return keepSource;
+}
+
+function openMergePicker(source, onDone) {
+  const rel = relatedIdeas(source, activeIdeas().filter((i) => !i.archived), { limit: 6, min: 0.05 }).map((r) => r.idea);
+  const rest = activeIdeas().filter((i) => !i.archived && i.id !== source.id && !rel.includes(i)).sort((a, b) => b.createdAt - a.createdAt).slice(0, 30);
+  const s = openSheet({
+    label: 'Combinar con otra idea',
+    html: `
+      <div class="sheet-grabber"></div>
+      <h2 class="sheet-title">Combinar “${esc(source.title)}” con…</h2>
+      <p class="muted">Todo su contenido pasa a la idea que elija y esta queda en la papelera (o archivada si ambas tienen audio).</p>
+      ${rel.length ? `<h3 class="drawer-title">Más parecidas</h3><ul class="pick-list">${rel.map((i) => `<li><button type="button" data-pick="${esc(i.id)}">${esc(i.title)}<small>${esc(fmtRelative(i.createdAt))}</small></button></li>`).join('')}</ul>` : ''}
+      ${rest.length ? `<h3 class="drawer-title">Otras ideas</h3><ul class="pick-list">${rest.map((i) => `<li><button type="button" data-pick="${esc(i.id)}">${esc(i.title)}<small>${esc(fmtRelative(i.createdAt))}</small></button></li>`).join('')}</ul>` : ''}
+      <div class="dlg-actions"><button type="button" class="btn ghost" data-cancel>Cancelar</button></div>`
+  });
+  s.el.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-cancel]')) { s.close(); return; }
+    const b = e.target.closest('[data-pick]');
+    if (!b) return;
+    const target = state.ideas.find((i) => i.id === b.dataset.pick);
+    if (!(await confirmDialog('¿Combinar las ideas?', `“${source.title}” se juntará dentro de “${target.title}”.`, 'Combinar'))) return;
+    const kept = await mergeIdeas(target, source);
+    s.close();
+    onDone && onDone(target);
+    toast(kept ? `Combinadas. La original quedó archivada para conservar su audio.` : `Combinadas en “${target.title}”.`, { action: 'Abrir', onAction: () => openEditor(target.id) });
+  });
+}
+
 // ---------------------------------------------------------------- notas con formato
 
 function inlineMd(text) {
@@ -1573,7 +2031,7 @@ async function shareText(title, text) {
 
 function emitChange(id) {
   document.dispatchEvent(new CustomEvent('idea-change', { detail: { id } }));
-  if (state.view === 'ideas' && !document.querySelector('.sheet.recorder')) renderIdeas();
+  if (!document.querySelector('.sheet.recorder')) refreshView();
 }
 
 function setProcessing(id, msg) {
@@ -2136,6 +2594,12 @@ function renderExplore() {
       <h2 class="card-title">💬 Preguntar a mis ideas</h2>
       <p class="muted">Converse con la IA sobre todas sus ideas: pendientes, temas que se repiten, qué grabó esta semana…</p>
       <button type="button" class="btn primary full-w" id="askAllBtn" ${visible.length ? '' : 'disabled'}>Abrir chat</button>
+    </div>
+    <div class="card ai-card">
+      <h2 class="card-title">🗓️ Resumen de mi semana</h2>
+      <p class="muted">La IA resume lo que capturó en los últimos 7 días: temas, decisiones, pendientes y una sugerencia para la próxima semana.</p>
+      <button type="button" class="btn soft full-w" id="digestBtn" ${thisWeek ? '' : 'disabled'}>${thisWeek ? `Resumir ${thisWeek} ${thisWeek === 1 ? 'idea' : 'ideas'} de la semana` : 'Sin ideas esta semana'}</button>
+      <div id="digestOut"></div>
     </div>` : ''}
 
     ${ai ? `
@@ -2173,6 +2637,32 @@ function renderExplore() {
   }));
   view.querySelector('#organizeBtn')?.addEventListener('click', runOrganize);
   view.querySelector('#askAllBtn')?.addEventListener('click', openAskAll);
+  view.querySelector('#digestBtn')?.addEventListener('click', async (e) => {
+    const out = $('#digestOut');
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    out.innerHTML = '<div class="loading"><span class="spinner"></span>Leyendo su semana…</div>';
+    try {
+      const week = activeIdeas().filter((i) => i.createdAt >= Date.now() - 7 * 86400000).sort((a, b) => a.createdAt - b.createdAt);
+      const md = await AI.weekDigest(aiConfig(), week, describeForChat);
+      out.innerHTML = `<div class="digest md">${renderMd(md)}</div>
+        <div class="note-actions"><button type="button" class="btn ghost small" id="dgCopy">Copiar</button><button type="button" class="btn ghost small" id="dgShare">Compartir</button><button type="button" class="btn ghost small" id="dgSave">Guardar como idea</button></div>`;
+      $('#dgCopy').onclick = () => copyText(mdToPlain(md));
+      $('#dgShare').onclick = () => shareText('Resumen de mi semana', mdToPlain(md));
+      $('#dgSave').onclick = async () => {
+        const idea = newIdea(mdToPlain(md), null);
+        idea.title = `Resumen de la semana · ${fmtShortDate(Date.now())}`;
+        idea.titleAuto = false;
+        idea.note = md;
+        idea.organizedAt = Date.now();
+        if (await persistIdea(idea, { touch: false })) toast('Resumen guardado como idea.', { action: 'Abrir', onAction: () => openEditor(idea.id) });
+      };
+    } catch (err) {
+      showAIError(out, err);
+    } finally {
+      btn.disabled = false;
+    }
+  });
   if (state.organizeResult) renderOrganize(state.organizeResult);
 }
 

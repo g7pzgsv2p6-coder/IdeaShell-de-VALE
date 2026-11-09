@@ -40,6 +40,28 @@ App web instalable (PWA) para iPhone para capturar ideas por voz y organizarlas.
 - **Respaldo con audios** opcional.
 - **Ideas de ejemplo** para probar la app vacía.
 
+### Novedades v1.2 (inteligente, ordenada y en colores pastel)
+
+**Diseño**
+- Nueva paleta pastel con degradado rosado → morado (claro y oscuro), ícono nuevo y saludo en degradado.
+
+**Inteligente (funciona sin internet y sin IA)**
+- Detecta fechas en español al guardar ("mañana a las 10", "el viernes", "martes 18", "25 de noviembre", "en 2 horas") y ofrece el recordatorio con un toque.
+- Sugiere la categoría según el texto y lo que usted ya clasificó.
+- Detecta tareas escritas ("hay que…", "tengo que…", "no olvidar…", "- [ ] …") y las agrega con un toque.
+- Avisa si la idea nueva se parece a una que ya existe y permite agregarla a esa idea.
+- Muestra ideas relacionadas dentro de cada idea.
+- Panel **Hoy**: recordatorios, tareas pendientes, grabaciones por organizar e idea para retomar.
+- Títulos automáticos más limpios ("Hay que llamar a Carla" → "Llamar a Carla…").
+- Con IA: **Resumen de mi semana** (temas, decisiones, pendientes y sugerencia).
+
+**Ordenada**
+- Pestañas **Ideas · Tareas · Tablero**.
+- **Tareas**: todas las tareas de todas las ideas en una lista, con avance, filtros y "Compartir pendientes".
+- **Tablero**: columnas Nueva / En desarrollo / Hecha para mover cada idea.
+- **Plantillas**: Reunión, Proyecto, Idea de negocio, Lista de compras, Diario y Estudio.
+- **Combinar ideas**: junta texto, nota, etiquetas, tareas y audio.
+
 ### IA opcional
 
 En **Ajustes → Inteligencia artificial** se elige el proveedor:
@@ -73,6 +95,7 @@ app/                  ← la app que se publica (rutas relativas)
   js/ai.js            ← Gemini y Claude
   js/voice.js         ← reconocimiento de voz
   js/recorder.js      ← grabación de audio y conversión para la IA
+  js/smart.js         ← fechas, tareas, ideas parecidas y categoría sugerida (sin internet)
   js/util.js
   icons/              ← íconos generados (192, 512, maskable, apple-touch 180)
 tools/                ← generador de íconos (logo original en tools/logo.mjs)
@@ -99,3 +122,26 @@ node tools/generate-icons.mjs
 Para cambiar el nombre o los colores: el nombre está en `app/index.html` y `app/manifest.webmanifest`; los colores en las variables del inicio de `app/styles.css` y el logo en `tools/logo.mjs`.
 
 Si agrega archivos nuevos a `app/`, súmelos a la lista `ASSETS` de `app/sw.js` para que funcionen sin internet.
+
+## Hoja de ruta (mejoras ordenadas para integrar)
+
+Hecho:
+
+| Versión | Qué incluye |
+|---|---|
+| 1.0 | Captura por voz y texto, categorías, etiquetas, búsqueda, respaldo, IA opcional (Gemini o Claude), PWA sin internet |
+| 1.1 | Grabaciones con audio, transcribir y organizar con IA, chat por nota y general, menú lateral, recordatorios, mosaico |
+| 1.2 | Diseño pastel, funciones inteligentes sin internet, Hoy, Tareas, Tablero, Plantillas, Combinar, Resumen semanal |
+
+Próximas mejoras sugeridas, en orden de prioridad:
+
+| # | Mejora | Valor | Esfuerzo | Necesita |
+|---|---|---|---|---|
+| 1 | Fotos en las ideas (boletas, pizarras) y que la IA las lea | Alto | Medio | Gemini para leer la foto |
+| 2 | Personas: escribir @Carla y ver todo lo pendiente con cada persona | Alto | Bajo | Nada |
+| 3 | Recordatorios que se repiten (cada semana, cada mes) | Medio | Bajo | Nada |
+| 4 | Marcadores durante la grabación ("momento importante") | Medio | Bajo | Nada |
+| 5 | Bloqueo con Face ID para abrir la app | Medio | Medio | Nada |
+| 6 | Exportar una nota como PDF para enviar | Medio | Medio | Nada |
+| 7 | Traducir una nota con IA | Bajo | Bajo | Clave de IA |
+| 8 | Sincronizar entre iPhone y computador | Alto | Alto | Un servicio en la nube (deja de ser 100 % local) |

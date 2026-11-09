@@ -326,6 +326,15 @@ export async function chatAll(cfg, ideas, history, describe) {
   return send(cfg, msgs);
 }
 
+/** Resumen semanal en formato de nota (## títulos y viñetas). */
+export async function weekDigest(cfg, ideas, describe) {
+  const list = ideas.slice(0, 120).map((i, n) => `${n + 1}. ${describe(i)}`).join('\n');
+  const prompt = 'Haga un resumen de la semana del usuario a partir de estas ideas y notas capturadas en los últimos 7 días. ' +
+    'Use exactamente estas secciones con "## ": "Lo principal", "Decisiones y avances", "Pendientes" y "Sugerencia para la próxima semana". ' +
+    'Debajo de cada una use viñetas "- " breves. Puede resaltar con **doble asterisco**. Máximo 220 palabras. No invente nada.\n\nIdeas:\n' + list;
+  return ask(cfg, prompt);
+}
+
 /** Agrupa ideas parecidas. Devuelve [{name, description, ids:[...]}]. */
 export async function organize(cfg, ideas) {
   const list = ideas.slice(0, 150);
