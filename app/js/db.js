@@ -1,8 +1,8 @@
 // Almacenamiento local en IndexedDB (todo queda en el teléfono)
 
 const DB_NAME = 'chispa-db';
-const DB_VERSION = 1;
-export const STORES = ['ideas', 'categories', 'settings'];
+const DB_VERSION = 2;
+export const STORES = ['ideas', 'categories', 'settings', 'audio'];
 
 let dbPromise = null;
 
@@ -48,6 +48,8 @@ export function openDB() {
       }
       if (!db.objectStoreNames.contains('categories')) db.createObjectStore('categories', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings', { keyPath: 'key' });
+      // v2: audios de las grabaciones, separados para que la lista cargue rápido
+      if (!db.objectStoreNames.contains('audio')) db.createObjectStore('audio', { keyPath: 'id' });
     };
     req.onsuccess = () => {
       const db = req.result;

@@ -1,7 +1,7 @@
 // Service worker de IdeaShel Vale: guarda la app en el teléfono para abrir sin internet.
 // BUILD se reemplaza automáticamente en cada despliegue (ver .github/workflows/pages.yml).
 const BUILD = 'dev';
-const CACHE = `chispa-1.0.0-${BUILD}`;
+const CACHE = `chispa-1.1.0-${BUILD}`;
 
 const ASSETS = [
   './',
@@ -13,6 +13,7 @@ const ASSETS = [
   './js/ai.js',
   './js/voice.js',
   './js/util.js',
+  './js/recorder.js',
   './icons/favicon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',

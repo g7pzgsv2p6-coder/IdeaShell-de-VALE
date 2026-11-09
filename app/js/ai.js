@@ -20,13 +20,21 @@ export class AIError extends Error {
   }
 }
 
-const SYSTEM = 'Usted es el asistente de IdeaShel Vale, una app para capturar y ordenar ideas. ' +
+const BASE_SYSTEM = 'Usted es el asistente de IdeaShel Vale, una app para capturar y ordenar ideas. ' +
   'Responda siempre en español de Chile, claro y breve, tratando al usuario de usted. ' +
   'Trabaje solo con la información de las ideas entregadas; no invente datos.';
 
+/** Instrucciones del sistema con la personalización del usuario (Ajustes → Personalizar la IA). */
+function systemPrompt(cfg) {
+  let s = BASE_SYSTEM;
+  if (cfg && cfg.about) s += `\n\nContexto sobre el usuario (úselo para entender mejor sus ideas):\n${cfg.about.slice(0, 1500)}`;
+  if (cfg && cfg.instructions) s += `\n\nPreferencias del usuario sobre cómo responder:\n${cfg.instructions.slice(0, 1500)}`;
+  return s;
+}
+
 const OFFLINE_MSG = 'Sin conexión a internet. Las funciones de IA necesitan internet; el resto de IdeaShel Vale funciona igual sin conexión.';
 
-async function fetchJSON(url, options, timeoutMs = 60000) {
+async function fetchJSON(url, options, timeoutMs = 90000) {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     throw new AIError('offline', OFFLINE_MSG);
   }
@@ -61,6 +69,9 @@ function geminiError(status, data) {
   if (status === 404) {
     return new AIError('model', 'El modelo de Gemini elegido no está disponible. Elija otro modelo en Ajustes → Inteligencia artificial.');
   }
+  if (status === 413 || /too large|payload size|exceeds the maximum/i.test(msg)) {
+    return new AIError('too_large', 'El audio es demasiado grande para enviarlo de una vez. Intente con una grabación más corta.');
+  }
   if (/location is not supported|region/i.test(msg)) {
     return new AIError('region', 'El nivel gratuito de Gemini no está disponible en su región para esta clave.');
   }
@@ -70,23 +81,29 @@ function geminiError(status, data) {
   return new AIError('unknown', 'Gemini respondió con un error' + (msg ? ': ' + msg : '.'));
 }
 
-async function callGemini({ key, model, prompt, json }) {
+/** messages: [{ role: 'user'|'assistant', text, audio?: {mime, base64} }] */
+async function callGemini({ key, model, system, messages, json }) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
   const body = {
-    systemInstruction: { parts: [{ text: SYSTEM }] },
-    contents: [{ role: 'user', parts: [{ text: prompt }] }]
+    systemInstruction: { parts: [{ text: system }] },
+    contents: messages.map((m) => {
+      const parts = [];
+      if (m.audio) parts.push({ inline_data: { mime_type: m.audio.mime, data: m.audio.base64 } });
+      if (m.text) parts.push({ text: m.text });
+      return { role: m.role === 'assistant' ? 'model' : 'user', parts };
+    })
   };
   if (json) body.generationConfig = { responseMimeType: 'application/json' };
   const { res, data } = await fetchJSON(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
     body: JSON.stringify(body)
-  });
+  }, 180000);
   if (!res.ok) throw geminiError(res.status, data);
   const cand = data && data.candidates && data.candidates[0];
   if (!cand) {
     if (data && data.promptFeedback && data.promptFeedback.blockReason) {
-      throw new AIError('blocked', 'Gemini no quiso procesar este texto. Pruebe redactando la idea de otra forma.');
+      throw new AIError('blocked', 'Gemini no quiso procesar este contenido. Pruebe redactándolo de otra forma.');
     }
     throw new AIError('empty', 'Gemini no devolvió respuesta. Intente de nuevo.');
   }
@@ -113,6 +130,9 @@ function claudeError(status, data) {
   if (status === 404 || type === 'not_found_error') {
     return new AIError('model', 'El modelo de Claude elegido no está disponible. Elija otro modelo en Ajustes.');
   }
+  if (status === 413 || type === 'request_too_large') {
+    return new AIError('too_large', 'El texto es demasiado largo para enviarlo de una vez.');
+  }
   if (status === 429 || type === 'rate_limit_error') {
     if (/spend|usage limit/i.test(msg)) {
       return new AIError('no_credits', 'Alcanzó el límite de gasto de su cuenta de Claude. Revise sus límites en console.anthropic.com.');
@@ -125,7 +145,10 @@ function claudeError(status, data) {
   return new AIError('unknown', 'Claude respondió con un error' + (msg ? ': ' + msg : '.'));
 }
 
-async function callClaude({ key, model, prompt }) {
+async function callClaude({ key, model, system, messages }) {
+  if (messages.some((m) => m.audio)) {
+    throw new AIError('no_audio', 'Claude no puede escuchar audios. Para transcribir grabaciones configure Gemini (gratis) en Ajustes.');
+  }
   const headers = {
     'content-type': 'application/json',
     'x-api-key': key,
@@ -135,8 +158,8 @@ async function callClaude({ key, model, prompt }) {
   const body = {
     model,
     max_tokens: 8000,
-    system: SYSTEM,
-    messages: [{ role: 'user', content: prompt }],
+    system,
+    messages: messages.map((m) => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.text })),
     output_config: { effort: 'low' }
   };
   if (model === 'claude-sonnet-5-5') {
@@ -151,7 +174,7 @@ async function callClaude({ key, model, prompt }) {
   });
   if (!res.ok) throw claudeError(res.status, data);
   if (data && data.stop_reason === 'refusal') {
-    throw new AIError('blocked', 'Claude no pudo procesar esta solicitud. Pruebe redactando la idea de otra forma.');
+    throw new AIError('blocked', 'Claude no pudo procesar esta solicitud. Pruebe redactándola de otra forma.');
   }
   const text = ((data && data.content) || []).filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
   if (!text) throw new AIError('empty', 'Claude no devolvió respuesta. Intente de nuevo.');
@@ -160,15 +183,20 @@ async function callClaude({ key, model, prompt }) {
 
 // ---------- Interfaz común ----------
 
-async function ask(cfg, prompt, json = false) {
+async function send(cfg, messages, json = false) {
   if (!cfg) throw new AIError('no_key', 'Configure una clave de IA en Ajustes para usar esta función.');
-  if (cfg.provider === 'gemini') return callGemini({ ...cfg, prompt, json });
-  if (cfg.provider === 'claude') return callClaude({ ...cfg, prompt, json });
+  const args = { ...cfg, system: systemPrompt(cfg), messages, json };
+  if (cfg.provider === 'gemini') return callGemini(args);
+  if (cfg.provider === 'claude') return callClaude(args);
   throw new AIError('no_key', 'Configure una clave de IA en Ajustes para usar esta función.');
 }
 
+const ask = (cfg, prompt, json = false) => send(cfg, [{ role: 'user', text: prompt }], json);
+
+export const canHearAudio = (cfg) => !!cfg && cfg.provider === 'gemini';
+
 export function parseJSON(text) {
-  let t = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+  const t = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
   const start = t.indexOf('{');
   const end = t.lastIndexOf('}');
   if (start === -1 || end <= start) throw new AIError('format', 'La IA respondió en un formato inesperado. Intente de nuevo.');
@@ -179,13 +207,14 @@ export function parseJSON(text) {
   }
 }
 
-function ideaBlock(idea) {
-  return `Título: ${idea.title || '(sin título)'}\nIdea:\n"""\n${(idea.text || '').slice(0, 6000)}\n"""`;
+function ideaBlock(idea, max = 12000) {
+  let s = `Título: ${idea.title || '(sin título)'}\nTexto:\n"""\n${(idea.text || '').slice(0, max)}\n"""`;
+  if (idea.note) s += `\nNota organizada:\n"""\n${idea.note.slice(0, 6000)}\n"""`;
+  return s;
 }
 
 export async function testConnection(cfg) {
-  const out = await ask(cfg, 'Responda solamente con la palabra: OK');
-  return out;
+  return ask(cfg, 'Responda solamente con la palabra: OK');
 }
 
 export async function summarize(cfg, idea) {
@@ -228,11 +257,80 @@ export async function expand(cfg, idea) {
   return (await ask(cfg, prompt)).replace(/\*\*/g, '').trim();
 }
 
+/**
+ * Transcribe una grabación (solo Gemini). chunks: [{ mime, base64 }] en orden.
+ * onProgress(i, total) se llama antes de cada trozo.
+ */
+export async function transcribe(cfg, chunks, { lang = 'es-CL', onProgress } = {}) {
+  if (!canHearAudio(cfg)) {
+    throw new AIError('no_audio', 'Para transcribir audios configure Gemini (gratis) en Ajustes. Claude no puede escuchar audios.');
+  }
+  const parts = [];
+  for (let i = 0; i < chunks.length; i++) {
+    onProgress && onProgress(i, chunks.length);
+    const prompt = `Transcriba fielmente este audio en español (${lang}). ` +
+      'Si hay varias personas hablando, separe los turnos con saltos de línea y, si se distingue, indique "Persona 1:", "Persona 2:". ' +
+      'Corrija solo la puntuación. No resuma, no agregue comentarios ni encabezados. Si no se escucha nada, responda: [sin voz]' +
+      (chunks.length > 1 ? ` Este es el trozo ${i + 1} de ${chunks.length} de una grabación más larga.` : '');
+    const text = await send(cfg, [{ role: 'user', audio: chunks[i], text: prompt }]);
+    if (!/^\[sin voz\]$/i.test(text.trim())) parts.push(text.trim());
+  }
+  return parts.join('\n\n').trim();
+}
+
+/**
+ * "Organizar con IA": convierte el texto o la transcripción en una nota ordenada.
+ * Devuelve { title, summary, note, tags, category, tasks }.
+ */
+export async function organizeNote(cfg, idea, categoryNames, existingTags) {
+  const prompt = 'Organice el siguiente contenido (puede ser una idea dictada o la transcripción de una reunión) en una nota clara y útil.\n' +
+    'Devuelva solo JSON con esta forma:\n' +
+    '{"titulo":"máximo 10 palabras","resumen":"1 o 2 frases","nota":"texto organizado","etiquetas":["..."],"categoria":"...","tareas":["..."]}\n' +
+    'Reglas para "nota": use líneas que empiecen con "## " para los temas principales y viñetas "- " debajo de cada tema ' +
+    '(sub-viñetas con dos espacios y "- "). Puede resaltar palabras clave con **doble asterisco**. Incluya decisiones, datos importantes, nombres y fechas mencionados. ' +
+    'Si el contenido es corto, la nota puede ser breve.\n' +
+    `"categoria" debe ser EXACTAMENTE una de: ${JSON.stringify(categoryNames)}.\n` +
+    '"etiquetas": 1 a 4, en minúsculas y sin #' +
+    (existingTags.length ? `, reutilizando cuando calcen: ${JSON.stringify(existingTags.slice(0, 60))}` : '') + '.\n' +
+    '"tareas": acciones concretas pendientes que se desprendan del contenido (0 a 8), cada una empezando con un verbo en infinitivo.\n\n' +
+    ideaBlock({ ...idea, note: '' }, 60000);
+  const d = parseJSON(await ask(cfg, prompt, true));
+  const note = String(d.nota || d.note || '').trim();
+  if (!note) throw new AIError('format', 'La IA no pudo organizar la nota. Intente de nuevo.');
+  return {
+    title: String(d.titulo || d.title || '').trim().slice(0, 90),
+    summary: String(d.resumen || d.summary || '').trim().slice(0, 400),
+    note,
+    tags: Array.isArray(d.etiquetas || d.tags) ? (d.etiquetas || d.tags).map(String) : [],
+    category: String(d.categoria || d.category || '').trim(),
+    tasks: (Array.isArray(d.tareas || d.tasks) ? (d.tareas || d.tasks) : []).map((t) => String(t).trim()).filter(Boolean).slice(0, 10)
+  };
+}
+
+/** Chat sobre una idea. history: [{role:'user'|'ai', text}] (incluye la pregunta nueva al final). */
+export async function chatIdea(cfg, idea, history) {
+  const context = 'Esta es la idea o nota sobre la que el usuario le hará preguntas. Responda usando su contenido; ' +
+    'si algo no está en la nota, dígalo. Use viñetas "- " cuando sirva y sea breve.\n\n' + ideaBlock(idea, 40000);
+  const msgs = [{ role: 'user', text: context }, { role: 'assistant', text: 'Entendido. ¿Qué desea saber de esta nota?' }];
+  for (const m of history.slice(-12)) msgs.push({ role: m.role === 'ai' ? 'assistant' : 'user', text: m.text });
+  return send(cfg, msgs);
+}
+
+/** Chat con todas las ideas (resumen de cada una como contexto). */
+export async function chatAll(cfg, ideas, history, describe) {
+  const list = ideas.slice(0, 200).map((i, n) => `${n + 1}. ${describe(i)}`).join('\n');
+  const context = 'Estas son las ideas guardadas por el usuario (más recientes primero). Responda sus preguntas usando solo esta información; ' +
+    'cuando se refiera a una idea, mencione su título entre comillas. Sea breve y use viñetas "- " cuando sirva.\n\n' + list;
+  const msgs = [{ role: 'user', text: context }, { role: 'assistant', text: 'Entendido. ¿Qué desea saber de sus ideas?' }];
+  for (const m of history.slice(-12)) msgs.push({ role: m.role === 'ai' ? 'assistant' : 'user', text: m.text });
+  return send(cfg, msgs);
+}
+
 /** Agrupa ideas parecidas. Devuelve [{name, description, ids:[...]}]. */
 export async function organize(cfg, ideas) {
   const list = ideas.slice(0, 150);
   const lines = list.map((idea, i) => {
-    const text = (idea.text || '').replace(/\s+/g, ' ').slice(0, 240);
+    const text = (idea.summary || idea.text || '').replace(/\s+/g, ' ').slice(0, 240);
     return `${i + 1}. ${idea.title || ''} — ${text}`;
   }).join('\n');
   const prompt = 'Agrupe las siguientes ideas por tema, juntando las que sean parecidas o relacionadas. ' +
