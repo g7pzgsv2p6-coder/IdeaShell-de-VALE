@@ -22,7 +22,7 @@ const browser = await chromium.launch();
 const page = await browser.newPage({ deviceScaleFactor: 1 });
 for (const t of targets) {
   await page.setViewportSize({ width: t.size, height: t.size });
-  await page.setContent(`<html><body style="margin:0;background:#4A2DC4">${logoSVG({ size: t.size, maskable: t.maskable })}</body></html>`);
+  await page.setContent(`<html><body style="margin:0;background:#E3B4F0">${logoSVG({ size: t.size, maskable: t.maskable })}</body></html>`);
   await page.screenshot({ path: join(out, t.file), clip: { x: 0, y: 0, width: t.size, height: t.size } });
   console.log('✓', t.file);
 }

@@ -26,6 +26,56 @@ App web instalable (PWA) para iPhone para capturar ideas por voz y organizarlas.
 - Tema automático, claro u oscuro, e idioma de voz elegible.
 - Aviso de nueva versión disponible.
 
+### Novedades v1.1 (grabaciones largas y asistente IA)
+
+- **Grabadora de audio**: el botón del micrófono graba el audio y lo guarda en el teléfono (sirve para reuniones largas). Tiene contador, medidor de nivel, pausa y transcripción en vivo cuando el navegador la permite.
+- **Reproductor** en cada grabación: reproducir/pausar, ±15 segundos, velocidad 1× a 2× y barra de avance.
+- **Transcribir y organizar con IA**: con Gemini, la grabación se transcribe y se convierte sola en una nota con título, temas, viñetas, etiquetas, categoría y tareas. Con Claude se organiza el texto dictado o escrito (Claude no escucha audios).
+- **Hablar con la IA** sobre cada nota, con preguntas sugeridas ("¿Qué tareas debo hacer según esta nota?"…). Las respuestas se pueden agregar a la nota.
+- **Preguntar a mis ideas**: chat con la IA sobre todas las ideas guardadas.
+- **Personalizar la IA**: contexto sobre usted y cómo quiere sus notas.
+- **Menú lateral** con Todas, Favoritas, Grabaciones, Programadas, categorías, Archivadas, Borradas recientemente y etiquetas (renombrar y borrar).
+- **Inicio en mosaico** (o lista) con saludo y barra de captura abajo.
+- **Recordatorios**: fecha y hora por idea, sección Programadas, aviso al abrir la app y botón para agregarlo al Calendario del iPhone (archivo .ics con alarma).
+- **Respaldo con audios** opcional.
+- **Ideas de ejemplo** para probar la app vacía.
+
+### Novedades v1.2 (inteligente, ordenada y en colores pastel)
+
+**Diseño**
+- Nueva paleta pastel con degradado rosado → morado (claro y oscuro), ícono nuevo y saludo en degradado.
+
+**Inteligente (funciona sin internet y sin IA)**
+- Detecta fechas en español al guardar ("mañana a las 10", "el viernes", "martes 18", "25 de noviembre", "en 2 horas") y ofrece el recordatorio con un toque.
+- Sugiere la categoría según el texto y lo que usted ya clasificó.
+- Detecta tareas escritas ("hay que…", "tengo que…", "no olvidar…", "- [ ] …") y las agrega con un toque.
+- Avisa si la idea nueva se parece a una que ya existe y permite agregarla a esa idea.
+- Muestra ideas relacionadas dentro de cada idea.
+- Panel **Hoy**: recordatorios, tareas pendientes, grabaciones por organizar e idea para retomar.
+- Títulos automáticos más limpios ("Hay que llamar a Carla" → "Llamar a Carla…").
+- Con IA: **Resumen de mi semana** (temas, decisiones, pendientes y sugerencia).
+
+**Ordenada**
+- Pestañas **Ideas · Tareas · Tablero**.
+- **Tareas**: todas las tareas de todas las ideas en una lista, con avance, filtros y "Compartir pendientes".
+- **Tablero**: columnas Nueva / En desarrollo / Hecha para mover cada idea.
+- **Plantillas**: Reunión, Proyecto, Idea de negocio, Lista de compras, Diario y Estudio.
+- **Combinar ideas**: junta texto, nota, etiquetas, tareas y audio.
+
+### Novedades v1.3 (Plan de trabajo desde Excel)
+
+- Nueva pestaña **Plan**: importe su plan de trabajo en Excel (.xlsx). El archivo se lee **en el teléfono** (sin librerías ni servidores) y los datos quedan solo ahí.
+- Reconoce hojas de **Actividades**, **Entregables**, **Metas**, **Bitácora**, **Resumen** (frentes y pesos) y **Referencia** (semana tipo, reglas e insumos), y detecta feriados.
+- **Resumen**: anillo de avance ponderado (real vs. planificado), días transcurridos, indicadores, avance por frente, alertas y próximos entregables.
+- **Agenda** día a día con foco y rutina de la semana tipo, atrasadas arriba y check rápido.
+- **Calendario** mensual con colores por frente y ◆ entregables; **Semanas** con línea de tiempo tipo Gantt.
+- **Entregables** con cuenta regresiva, estado (pendiente, entregado, validado) y quién valida.
+- **Metas** real vs. meta con + y −; **Personas** con lo que depende de cada una.
+- **Bitácora** diaria que se completa sola con las actividades del día y se comparte en un toque.
+- **Reporte semanal** armado solo (y redacción mejorada con IA, opcional); **chat con la IA** sobre el plan.
+- Detalle de cada actividad: estado, % de avance, fecha real, bloqueos, reprogramar, recordatorio en el Calendario y crear una nota.
+- Actualizar con una nueva versión del Excel **manteniendo el avance**, exportar el avance a CSV (Excel) y respaldo incluido.
+
 ### IA opcional
 
 En **Ajustes → Inteligencia artificial** se elige el proveedor:
@@ -33,7 +83,7 @@ En **Ajustes → Inteligencia artificial** se elige el proveedor:
 - **Gemini** (Google AI Studio, nivel gratuito). Modelo por defecto `gemini-flash-latest`, que siempre apunta al Gemini Flash vigente.
 - **Claude** (Anthropic, pago por uso). Modelo por defecto `claude-haiku-5-5` (el más económico), con opción de `claude-sonnet-5-5`.
 
-Funciones por idea: Resumir, Sugerir título/categoría/etiquetas, Convertir en lista de pasos, Expandir idea. Función general (pestaña Explorar): Organizar mis ideas (agrupa ideas parecidas y propone etiquetas).
+Funciones por idea: Transcribir y organizar, Resumir, Sugerir título/categoría/etiquetas, Convertir en lista de pasos, Expandir idea y chat. Funciones generales (Explorar): Preguntar a mis ideas y Organizar mis ideas (agrupa ideas parecidas y propone etiquetas).
 
 Las claves quedan guardadas **solo en el teléfono**, nunca se incluyen en los respaldos y se pueden borrar con un botón. Sin clave, la app funciona completa y se ocultan las funciones de IA.
 
@@ -58,6 +108,10 @@ app/                  ← la app que se publica (rutas relativas)
   js/db.js            ← IndexedDB
   js/ai.js            ← Gemini y Claude
   js/voice.js         ← reconocimiento de voz
+  js/recorder.js      ← grabación de audio y conversión para la IA
+  js/smart.js         ← fechas, tareas, ideas parecidas y categoría sugerida (sin internet)
+  js/plan.js          ← lector de Excel (.xlsx) y cálculos del plan de trabajo
+  js/plan-ui.js       ← pantallas del plan (resumen, agenda, calendario, semanas…)
   js/util.js
   icons/              ← íconos generados (192, 512, maskable, apple-touch 180)
 tools/                ← generador de íconos (logo original en tools/logo.mjs)
@@ -74,6 +128,10 @@ cd app && python3 -m http.server 8080      # abrir http://localhost:8080
 # Prueba completa (Playwright, tamaño iPhone, genera capturas en capturas/)
 node tests/e2e.mjs
 
+# Video de demostración (IA simulada) en tamaño iPhone
+node tools/demo-video.mjs ./demo
+node tools/demo-plan-video.mjs mi-plan.xlsx ./demo   # demo del Plan con su propio Excel (queda en ./demo)
+
 # Regenerar íconos después de cambiar tools/logo.mjs
 node tools/generate-icons.mjs
 ```
@@ -81,3 +139,29 @@ node tools/generate-icons.mjs
 Para cambiar el nombre o los colores: el nombre está en `app/index.html` y `app/manifest.webmanifest`; los colores en las variables del inicio de `app/styles.css` y el logo en `tools/logo.mjs`.
 
 Si agrega archivos nuevos a `app/`, súmelos a la lista `ASSETS` de `app/sw.js` para que funcionen sin internet.
+
+## Hoja de ruta (mejoras ordenadas para integrar)
+
+Hecho:
+
+| Versión | Qué incluye |
+|---|---|
+| 1.0 | Captura por voz y texto, categorías, etiquetas, búsqueda, respaldo, IA opcional (Gemini o Claude), PWA sin internet |
+| 1.1 | Grabaciones con audio, transcribir y organizar con IA, chat por nota y general, menú lateral, recordatorios, mosaico |
+| 1.2 | Diseño pastel, funciones inteligentes sin internet, Hoy, Tareas, Tablero, Plantillas, Combinar, Resumen semanal |
+| 1.3 | Plan de trabajo desde Excel: resumen, agenda, calendario, semanas, entregables, metas, personas, bitácora, reporte y reglas |
+
+Próximas mejoras sugeridas, en orden de prioridad:
+
+| # | Mejora | Valor | Esfuerzo | Necesita |
+|---|---|---|---|---|
+| 1 | Fotos en las ideas (boletas, pizarras) y que la IA las lea | Alto | Medio | Gemini para leer la foto |
+| 2 | Personas: escribir @Carla y ver todo lo pendiente con cada persona | Alto | Bajo | Nada |
+| 3 | Recordatorios que se repiten (cada semana, cada mes) | Medio | Bajo | Nada |
+| 4 | Marcadores durante la grabación ("momento importante") | Medio | Bajo | Nada |
+| 5 | Bloqueo con Face ID para abrir la app | Medio | Medio | Nada |
+| 6 | Exportar una nota como PDF para enviar | Medio | Medio | Nada |
+| 7 | Traducir una nota con IA | Bajo | Bajo | Clave de IA |
+| 8 | Sincronizar entre iPhone y computador | Alto | Alto | Un servicio en la nube (deja de ser 100 % local) |
+
+> **Privacidad del Plan:** el repositorio es público, por eso aquí no hay datos reales de ningún plan. Las pruebas usan un plan ficticio que genera `tests/make-plan-fixture.py`. Su Excel se carga directamente en la app del teléfono.

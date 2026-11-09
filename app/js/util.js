@@ -55,6 +55,8 @@ const FILLERS = /^(eh+|em+|mm+|este|bueno|ya|ok|okay|entonces|o sea|mira|oye|pue
 export function autoTitle(text) {
   let t = String(text ?? '').replace(HASHTAG_RE, '').replace(/\s+/g, ' ').trim();
   for (let i = 0; i < 4; i++) t = t.replace(FILLERS, '');
+  // "Hay que llamar a Carla" → "Llamar a Carla"
+  t = t.replace(/^(hay que|tengo que|tenemos que|debo|debemos|necesito|necesitamos|no olvidar|recordar)\s+/i, '');
   if (!t) return 'Idea sin título';
   const firstSentence = (t.match(/^[^.!?\n]+/) || [t])[0].trim();
   const words = firstSentence.split(' ').filter(Boolean);
